@@ -1,7 +1,7 @@
 mod handlers;
 
 use handlers::HandlerError;
-use tracing::{debug, error, field, info, info_span, warn, Instrument, Span};
+use tracing::{Instrument, Span, debug, error, field, info, info_span, warn};
 
 use super::task::Task;
 use crate::{config::Config, queue::TASK_QUEUE};

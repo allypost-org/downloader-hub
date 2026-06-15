@@ -1,6 +1,12 @@
 use std::time::Duration;
 
+pub use run::run_future;
 pub use tryhard;
+
+pub mod killable;
+pub mod retry_future;
+pub mod run;
+pub mod task_controller;
 
 pub fn retry_fn<F, Fut, T, E>(
     max_retires: u32,

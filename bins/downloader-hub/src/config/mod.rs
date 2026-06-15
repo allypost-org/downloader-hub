@@ -1,6 +1,6 @@
 use app_config::{
-    common, conditional::server::ServerConfig, validators::print_validation_errors, Dumpable,
-    GlobalConfig,
+    Dumpable, GlobalConfig, common, conditional::server::ServerConfig,
+    validators::print_validation_errors,
 };
 use clap::Parser;
 use serde::{Deserialize, Serialize};
@@ -20,11 +20,19 @@ pub struct Config {
 
     #[clap(flatten)]
     #[validate(nested)]
+    pub disabled_entries: common::DisabledEntriesConfig,
+
+    #[clap(flatten)]
+    #[validate(nested)]
     pub endpoint: common::EndpointConfig,
 
     #[clap(flatten)]
     #[validate(nested)]
     pub task: common::TaskConfig,
+
+    #[clap(flatten)]
+    #[validate(nested)]
+    pub request: common::RequestConfig,
 
     #[clap(flatten)]
     #[validate(nested)]
@@ -41,7 +49,12 @@ impl Config {
 
         {
             let parsed = parsed.clone();
-            app_actions::config::init(parsed.endpoint, parsed.dependency_paths)?;
+            app_actions::config::init(
+                parsed.endpoint,
+                parsed.dependency_paths,
+                parsed.disabled_entries.entries,
+                parsed.request,
+            )?;
         }
 
         {

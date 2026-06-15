@@ -5,9 +5,11 @@ pub mod imgur;
 pub mod instagram;
 pub mod music;
 pub mod reddit;
+pub mod threads;
 pub mod tiktok;
 pub mod tumblr;
 pub mod twitter;
+pub mod youtube;
 
 use std::sync::{Arc, LazyLock};
 
@@ -21,10 +23,12 @@ pub static AVAILABLE_EXTRACTORS: LazyLock<Vec<ExtractorEntry>> =
 #[must_use]
 pub fn available_extractors() -> Vec<ExtractorEntry> {
     vec![
+        Arc::new(threads::Threads),
         Arc::new(imgur::Imgur),
         Arc::new(instagram::Instagram),
         Arc::new(reddit::Reddit),
         Arc::new(tiktok::Tiktok),
+        Arc::new(youtube::Youtube),
         Arc::new(tumblr::Tumblr),
         Arc::new(twitter::Twitter),
         Arc::new(music::Music),

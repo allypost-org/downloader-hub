@@ -17,8 +17,8 @@ use tracing::{debug, error, trace};
 use crate::{
     config::ActionsConfig,
     fixers::{
-        common::{FixRequest, FixResult, FixerError},
         Fixer, FixerReturn, IntoFixerReturn,
+        common::{FixRequest, FixResult, FixerError},
     },
 };
 

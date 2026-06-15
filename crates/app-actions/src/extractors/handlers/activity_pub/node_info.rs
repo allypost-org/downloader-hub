@@ -52,7 +52,7 @@ pub async fn get_node_info(node_url: &str) -> Result<NodeInfo, String> {
         .await
         .map_err(|e| format!("Failed to get NodeInfo: {:?}", e))?;
 
-    trace!(?info_list_resp, "Got info list response");
+    trace!(len = info_list_resp.len(), "Got info list response");
 
     let info_list: NodeInfoList = serde_json::from_str(&info_list_resp)
         .map_err(|e| format!("Failed to parse NodeInfo: {:?}", e))?;

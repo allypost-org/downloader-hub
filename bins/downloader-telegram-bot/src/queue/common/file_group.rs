@@ -6,7 +6,7 @@ use std::{
 };
 
 use app_helpers::file_type::{infer_file_type, mime};
-use futures::{stream::FuturesUnordered, StreamExt};
+use futures::{StreamExt, stream::FuturesUnordered};
 use teloxide::types::{
     InputFile, InputMedia, InputMediaAudio, InputMediaDocument, InputMediaPhoto, InputMediaVideo,
 };

@@ -79,7 +79,7 @@ impl AuthorizationSchema {
 
     pub async fn authorize(&self, db: &DatabaseConnection) -> Option<CurrentUser> {
         match self {
-            Self::ApiKey(ref key) => {
+            Self::ApiKey(key) => {
                 let res = client::Entity::find()
                     .filter(client::Column::ApiKey.eq(key))
                     .one(db)
@@ -90,19 +90,17 @@ impl AuthorizationSchema {
                 Some(res)
             }
 
-            Self::AdminKey(ref key) if Config::server().run.admin_key == *key => {
-                Some(CurrentUser {
-                    id: ADMIN_ID,
-                    name: "admin".to_string(),
-                    api_key: key.to_string(),
-                    app_meta: serde_json::json!({
-                        "admin": true,
-                    }),
-                    download_folder: AppPath::None.into(),
-                    created_at: chrono::Utc::now().fixed_offset(),
-                    updated_at: chrono::Utc::now().fixed_offset(),
-                })
-            }
+            Self::AdminKey(key) if Config::server().run.admin_key == *key => Some(CurrentUser {
+                id: ADMIN_ID,
+                name: "admin".to_string(),
+                api_key: key.clone(),
+                app_meta: serde_json::json!({
+                    "admin": true,
+                }),
+                download_folder: AppPath::None.into(),
+                created_at: chrono::Utc::now().fixed_offset(),
+                updated_at: chrono::Utc::now().fixed_offset(),
+            }),
             Self::AdminKey(_) => None,
         }
     }

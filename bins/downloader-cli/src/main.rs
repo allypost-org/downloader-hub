@@ -1,13 +1,13 @@
-use std::{collections::HashSet, fmt::Debug, path::PathBuf, result::Result};
+use std::{collections::HashSet, fmt::Debug, io::stderr, path::PathBuf, result::Result};
 
 use app_actions::{
     actions::{
-        handlers::{file_rename_to_id::RenameToId, split_scenes::SplitScenes},
         Action, ActionRequest,
+        handlers::{file_rename_to_id::RenameToId, split_scenes::SplitScenes},
     },
     download_file, fix_file,
 };
-use futures::{stream::FuturesUnordered, StreamExt};
+use futures::{StreamExt, stream::FuturesUnordered};
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::{filter::LevelFilter, util::SubscriberInitExt};
 
@@ -150,6 +150,14 @@ async fn main() {
         }
     }
 
+    let (partially_failed_downloaded, failed_downloaded): (Vec<_>, Vec<_>) = failed_downloaded
+        .into_iter()
+        .partition(|(_url, x)| x.is_soft_error());
+
+    for (x, e) in partially_failed_downloaded {
+        warn!("Failed to download {x:?} (marked as soft error): {e}");
+    }
+
     if !failed_downloaded.is_empty() || !failed_fixed.is_empty() || !failed_split.is_empty() {
         for (x, e) in failed_downloaded {
             error!("Failed to download {x:?}: {e}");
@@ -168,11 +176,19 @@ async fn main() {
 }
 
 fn split_vec_err<T: Debug, E: Debug>(v: Vec<Result<T, E>>) -> (Vec<T>, Vec<E>) {
-    let (ok, err) = v.into_iter().partition::<Vec<_>, _>(Result::is_ok);
-    (
-        ok.into_iter().map(Result::unwrap).collect(),
-        err.into_iter().map(Result::unwrap_err).collect(),
-    )
+    v.into_iter()
+        .fold((vec![], vec![]), |(mut acc_ok, mut acc_err), x| {
+            match x {
+                Ok(x) => {
+                    acc_ok.push(x);
+                }
+                Err(e) => {
+                    acc_err.push(e);
+                }
+            }
+
+            (acc_ok, acc_err)
+        })
 }
 
 fn print_errors<T: Sized>(name: &str, maybe_errors: Vec<Result<T, String>>) -> Vec<T> {
@@ -263,6 +279,7 @@ fn init_log() {
                 .with_env_var("DOWNLOADER_HUB_LOG_LEVEL")
                 .from_env_lossy(),
         )
+        .with_writer(stderr)
         .finish()
         .init();
 }

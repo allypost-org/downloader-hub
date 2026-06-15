@@ -1,4 +1,4 @@
-use tracing::{debug, error, info, info_span, Instrument, Span};
+use tracing::{Instrument, Span, debug, error, info, info_span};
 
 use crate::config::TaskConfig;
 
@@ -20,6 +20,8 @@ pub fn spawn() {
                     if let Err(e) = tasks::yt_dlp::update_yt_dlp().await {
                         error!("Failed to update yt-dlp: {e:?}");
                     }
+
+                    info!("Updated yt-dlp");
                 }
             }
             .instrument(Span::current()),

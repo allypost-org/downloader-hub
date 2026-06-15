@@ -1,10 +1,10 @@
 use std::{net::SocketAddr, sync::LazyLock, time::Duration};
 
 use axum::{
-    http::{header, HeaderValue, Request},
+    Extension,
+    http::{HeaderValue, Request, header},
     middleware,
     response::Response,
-    Extension,
 };
 use listenfd::ListenFd;
 use tokio::net::TcpListener;
@@ -17,7 +17,7 @@ use tower_http::{
     timeout::TimeoutLayer,
     trace::TraceLayer,
 };
-use tracing::{debug, field, info, trace, Span};
+use tracing::{Span, debug, field, info, trace};
 
 use self::app_middleware::auth::CurrentUser;
 use crate::{config::Config, db::AppDb};
@@ -157,7 +157,7 @@ where
                             );
                         }),
                 )
-                .layer(TimeoutLayer::new(Duration::from_secs(60)))
+                .layer(TimeoutLayer::new(Duration::from_mins(1)))
                 .layer(PropagateRequestIdLayer::x_request_id())
                 .layer(SetResponseHeaderLayer::if_not_present(
                     header::CACHE_CONTROL,

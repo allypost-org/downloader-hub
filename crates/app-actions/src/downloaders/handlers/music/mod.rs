@@ -11,7 +11,7 @@ use tracing::warn;
 use url::Url;
 
 use super::{DownloadRequest, Downloader, DownloaderReturn};
-use crate::downloaders::DownloadResult;
+use crate::downloaders::{DownloadResult, DownloaderError};
 
 static HANDLERS: LazyLock<Vec<DownloadHandler>> = LazyLock::new(|| {
     vec![
@@ -51,7 +51,7 @@ impl Downloader for Music {
                     return Ok(DownloadResult {
                         path,
                         request: req.clone(),
-                    })
+                    });
                 }
                 Err(e) => {
                     warn!(?e, "Failed to download song");
@@ -59,7 +59,9 @@ impl Downloader for Music {
             }
         }
 
-        Err("No handler succeeded for song".to_string())
+        Err(DownloaderError::Error(
+            "No handler succeeded for song".to_string(),
+        ))
     }
 }
 

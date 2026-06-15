@@ -7,10 +7,10 @@ use app_entities::{
     },
 };
 use axum::{
+    Extension, Json, Router,
     extract::{Path, Query},
     middleware,
     routing::get,
-    Extension, Json, Router,
 };
 use axum_extra::extract::WithRejection;
 use futures::StreamExt;
@@ -21,12 +21,12 @@ use tower_http::request_id::RequestId;
 use crate::{
     db::AppDb,
     server::{
+        AppRouter,
         app_helpers::pagination::{Paginated, PaginationQuery},
         routes::v1::{
-            middleware::auth::{require_auth_not_admin, CurrentUser},
+            middleware::auth::{CurrentUser, require_auth_not_admin},
             response::{V1Error, V1Response, V1Result},
         },
-        AppRouter,
     },
     service::{
         download_request::{CreateDownloadRequestPayload, DownloadRequestService},

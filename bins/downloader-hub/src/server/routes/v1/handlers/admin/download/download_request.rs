@@ -1,8 +1,8 @@
 use app_entities::{download_result, entity_meta::download_request::DownloadRequestWithHidden};
 use axum::{
+    Router,
     extract::{Path, Query},
     routing::get,
-    Router,
 };
 use futures::StreamExt;
 use sea_orm::{Condition, ModelTrait};
@@ -13,9 +13,9 @@ use crate::{
     db::AppDb,
     queue::TASK_QUEUE,
     server::{
+        AppRouter,
         app_helpers::pagination::{Paginated, PaginationQuery},
         routes::v1::response::{V1Response, V1Result},
-        AppRouter,
     },
     service::{
         download_request::DownloadRequestService,

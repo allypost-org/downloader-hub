@@ -8,8 +8,8 @@ use app_helpers::file_type::infer_file_type;
 use axum::{
     body::Body,
     http::{
-        header::{self, IntoHeaderName},
         HeaderMap, HeaderValue, Request, StatusCode,
+        header::{self, IntoHeaderName},
     },
     response::IntoResponse,
 };
@@ -45,16 +45,16 @@ impl RangeResponder {
         {
             let path = self.path.as_ref();
             let content_type = infer_file_type(path);
-            if let Ok(content_type) = content_type {
-                if let Ok(content_type) = content_type.essence_str().parse() {
-                    res.append(header::CONTENT_TYPE, content_type);
-                }
+            if let Ok(content_type) = content_type
+                && let Ok(content_type) = content_type.essence_str().parse()
+            {
+                res.append(header::CONTENT_TYPE, content_type);
             }
 
-            if cfg!(debug_assertions) {
-                if let Ok(path) = path.to_string_lossy().parse() {
-                    res.append("X-File-Path", path);
-                }
+            if cfg!(debug_assertions)
+                && let Ok(path) = path.to_string_lossy().parse()
+            {
+                res.append("X-File-Path", path);
             }
         }
 
@@ -105,13 +105,13 @@ impl RangeResponder {
                 .and_then(|x| DateTime::parse_from_rfc2822(x).ok())
                 .map(|x| x.with_timezone(&Utc));
 
-            if let Some(req_time) = req_time {
-                if let Ok(mtime) = metadata.modified() {
-                    let file_time: DateTime<Utc> = mtime.into();
+            if let Some(req_time) = req_time
+                && let Ok(mtime) = metadata.modified()
+            {
+                let file_time: DateTime<Utc> = mtime.into();
 
-                    if file_time.sub(req_time) > chrono::Duration::milliseconds(10) {
-                        return Err(StatusCode::NOT_MODIFIED);
-                    }
+                if file_time.sub(req_time) > chrono::Duration::milliseconds(10) {
+                    return Err(StatusCode::NOT_MODIFIED);
                 }
             }
         }

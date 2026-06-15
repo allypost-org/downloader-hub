@@ -1,5 +1,3 @@
-use std::sync::OnceLock;
-
 use app_helpers::encoding::{from_base64_padded, to_base64_padded};
 use chrono::{DateTime, Duration, Utc};
 use hmac::{Hmac, Mac};
@@ -65,31 +63,19 @@ impl Signature {
     pub fn to_params(&self) -> Vec<(String, String)> {
         let vals = serde_json::to_value(self).expect("Failed to convert to value");
         let vals = vals.as_object().expect("Failed to convert to object");
-        let vals = vals
-            .iter()
-            .filter_map(|(k, v)| Some((k.to_string(), v.as_str()?.to_string())))
-            .collect::<Vec<_>>();
 
-        vals
+        vals.iter()
+            .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string())))
+            .collect::<Vec<_>>()
     }
 
     pub fn to_absulute_url_from_path<TBase>(&self, base: TBase) -> Url
     where
         TBase: AsRef<str>,
     {
-        static BASE: OnceLock<Url> = OnceLock::new();
-        let base_url = BASE.get_or_init(|| {
-            let mut base_url = Config::server()
-                .app
-                .public_url
-                .trim_end_matches('/')
-                .to_string();
-            base_url.push('/');
-
-            Url::parse(&base_url).expect("Failed to parse base url")
-        });
-
-        let res = base_url
+        let res = Config::server()
+            .app
+            .public_url
             .join(base.as_ref().trim_start_matches('/'))
             .expect("Failed to join url");
 
@@ -145,7 +131,7 @@ pub enum SignatureError {
 mod signature_enc {
     use app_helpers::encoding::BaseEncoding;
     use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
-    use serde::{self, de::Error, Deserialize, Deserializer, Serializer};
+    use serde::{self, Deserialize, Deserializer, Serializer, de::Error};
 
     pub fn serialize<S>(timestamp: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
     where

@@ -1,6 +1,6 @@
-use axum::{middleware, Router};
+use axum::{Router, middleware};
 
-use crate::server::{routes::v1::middleware::auth::require_admin, AppRouter};
+use crate::server::{AppRouter, routes::v1::middleware::auth::require_admin};
 
 mod clients;
 mod download;

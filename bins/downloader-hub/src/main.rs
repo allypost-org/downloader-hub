@@ -4,7 +4,7 @@ use tracing::{debug, error};
 use crate::{
     config::Config,
     db::AppDb,
-    queue::{processor::TaskQueueProcessor, TaskQueue},
+    queue::{TaskQueue, processor::TaskQueueProcessor},
 };
 
 mod config;

@@ -1,18 +1,18 @@
 use std::path::PathBuf;
 
 use app_actions::{
-    actions::{handlers::ActionEntry, ActionOptions},
+    actions::{ActionOptions, handlers::ActionEntry},
     fixers::handlers::FixerInstance,
 };
 use teloxide::{
     prelude::*,
     types::{Message, ReplyParameters},
 };
-use tracing::{debug, field, trace, warn, Span};
+use tracing::{Span, debug, field, trace, warn};
 
 use crate::{
-    bot::{helpers::status_message::StatusMessage, TelegramBot},
-    queue::common::file_group::{files_to_input_media_groups, MAX_PAYLOAD_SIZE_BYTES},
+    bot::{TelegramBot, helpers::status_message::StatusMessage},
+    queue::common::file_group::{MAX_PAYLOAD_SIZE_BYTES, files_to_input_media_groups},
 };
 
 #[derive(Clone, Debug)]

@@ -1,7 +1,8 @@
 use std::path::Path;
 
-use futures::{stream::FuturesUnordered, StreamExt};
-use tracing::{debug, info_span, Instrument};
+use downloaders::DownloaderError;
+use futures::{StreamExt, stream::FuturesUnordered};
+use tracing::{Instrument, debug, info_span};
 
 pub mod actions;
 pub(crate) mod common;
@@ -24,9 +25,9 @@ where
         let info = match extractors::extract_info(&request).await {
             Ok(x) => x,
             Err(e) => {
-                return vec![Err(format!(
+                return vec![Err(DownloaderError::FallibleFailed(format!(
                     "Failed to extract info from {request:?}: <u>{e}</u>"
-                ))];
+                )))];
             }
         };
 

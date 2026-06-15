@@ -1,8 +1,8 @@
-use std::path::PathBuf;
+use std::{collections::HashSet, path::PathBuf};
 
 use app_config::{
-    common::{EndpointConfig, ProgramPathConfig, ProjectConfig},
     GlobalConfig,
+    common::{DisableEntry, EndpointConfig, ProgramPathConfig, ProjectConfig, RequestConfig},
 };
 use validator::Validate;
 
@@ -13,6 +13,11 @@ pub(crate) struct ActionsConfig {
 
     #[validate(nested)]
     pub dependency_paths: ProgramPathConfig,
+
+    #[validate(nested)]
+    pub request: RequestConfig,
+
+    pub disabled_entries: HashSet<DisableEntry>,
 }
 
 impl ActionsConfig {
@@ -33,12 +38,41 @@ impl ActionsConfig {
     pub fn cache_dir() -> PathBuf {
         ProjectConfig::cache_dir()
     }
+
+    #[must_use]
+    #[inline]
+    pub fn request() -> &'static RequestConfig {
+        &Self::global().request
+    }
+
+    pub fn is_enabled<E>(&self, entry: E) -> bool
+    where
+        E: Into<DisableEntry>,
+    {
+        !self.disabled_entries.contains(&entry.into())
+    }
 }
 
-pub fn init(endpoint: EndpointConfig, dependency_paths: ProgramPathConfig) -> Result<(), String> {
+pub fn init<DE, DEI>(
+    endpoint: EndpointConfig,
+    dependency_paths: ProgramPathConfig,
+    disabled_entries: DE,
+    request: RequestConfig,
+) -> Result<(), String>
+where
+    DE: IntoIterator<Item = DEI>,
+    DEI: Into<DisableEntry>,
+{
+    let _ = app_helpers::config::init(dependency_paths.clone());
+
     ActionsConfig::init(ActionsConfig {
         endpoint,
         dependency_paths,
+        request,
+        disabled_entries: disabled_entries
+            .into_iter()
+            .map(std::convert::Into::into)
+            .collect(),
     })?;
 
     Ok(())

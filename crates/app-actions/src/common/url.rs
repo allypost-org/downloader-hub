@@ -1,11 +1,12 @@
-use http::{header::IntoHeaderName, HeaderMap, HeaderValue, Method};
+use http::{HeaderMap, HeaderValue, Method, header::IntoHeaderName};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
 pub type UrlHeaders = HeaderMap;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(derive_more::Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UrlWithMeta {
+    #[debug("{:?}", url.as_str())]
     url: Url,
     #[serde(with = "http_serde::header_map", default)]
     headers: UrlHeaders,
@@ -14,9 +15,16 @@ pub struct UrlWithMeta {
 }
 impl UrlWithMeta {
     #[must_use]
-    pub fn from_url(url: &str) -> Self {
+    pub fn from_url_str(url: &str) -> Self {
+        let url = Url::parse(url).unwrap_or_else(|_| panic!("Failed to parse URL: {:?}", url));
+
+        Self::from_url(url)
+    }
+
+    #[must_use]
+    pub fn from_url(url: Url) -> Self {
         Self {
-            url: Url::parse(url).unwrap_or_else(|_| panic!("Failed to parse URL: {:?}", url)),
+            url,
             headers: UrlHeaders::default(),
             method: Method::GET,
         }
@@ -29,7 +37,8 @@ impl UrlWithMeta {
     }
 
     #[must_use]
-    pub fn with_header<K, V>(mut self, key: K, value: &V) -> Self
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn with_header<K, V>(mut self, key: K, value: V) -> Self
     where
         K: IntoHeaderName,
         V: ToString,
@@ -68,16 +77,21 @@ impl UrlWithMeta {
 
 impl From<&str> for UrlWithMeta {
     fn from(url: &str) -> Self {
-        Self::from_url(url)
+        Self::from_url_str(url)
     }
 }
 impl From<String> for UrlWithMeta {
     fn from(url: String) -> Self {
-        Self::from_url(&url)
+        Self::from_url_str(&url)
     }
 }
 impl From<&String> for UrlWithMeta {
     fn from(url: &String) -> Self {
+        Self::from_url_str(url)
+    }
+}
+impl From<Url> for UrlWithMeta {
+    fn from(url: Url) -> Self {
         Self::from_url(url)
     }
 }

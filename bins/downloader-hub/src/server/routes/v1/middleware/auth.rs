@@ -7,7 +7,7 @@ use axum::{
 
 pub use crate::server::app_middleware::auth::CurrentUser;
 use crate::server::{
-    app_middleware::auth::{add_user_to_request, is_admin, AuthQueryKey},
+    app_middleware::auth::{AuthQueryKey, add_user_to_request, is_admin},
     routes::v1::response::V1Response,
 };
 

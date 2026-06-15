@@ -99,17 +99,14 @@ impl ProgramPathConfig {
             .ffprobe_path
             .clone()
             .or_else(|| which::which("ffprobe").ok());
-
         self.scenedetect_path = self
             .scenedetect_path
             .clone()
             .or_else(|| which::which("scenedetect").ok());
-
         self.imagemagick_path = self
             .imagemagick_path
             .clone()
             .or_else(|| which::which("magick").ok());
-
         self
     }
 }

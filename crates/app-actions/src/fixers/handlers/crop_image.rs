@@ -6,7 +6,7 @@ use tracing::{debug, warn};
 use crate::{
     config::ActionsConfig,
     fixers::{
-        common::crop_filter::CropFilter, FixRequest, FixResult, Fixer, FixerError, FixerReturn,
+        FixRequest, FixResult, Fixer, FixerError, FixerReturn, common::crop_filter::CropFilter,
     },
 };
 

@@ -5,8 +5,8 @@ pub mod yt_dlp;
 use std::sync::{Arc, LazyLock};
 
 pub use super::{
-    common::{download_request::DownloadRequest, download_result::DownloadResult},
     Downloader, DownloaderError, DownloaderReturn,
+    common::{download_request::DownloadRequest, download_result::DownloadResult},
 };
 
 pub type DownloaderEntry = Arc<dyn Downloader>;
@@ -28,6 +28,6 @@ fn all_downloaders() -> Vec<DownloaderEntry> {
 fn available_downloaders() -> Vec<DownloaderEntry> {
     all_downloaders()
         .into_iter()
-        .filter(|x| x.can_run())
+        .filter(|x| x.is_enabled())
         .collect()
 }

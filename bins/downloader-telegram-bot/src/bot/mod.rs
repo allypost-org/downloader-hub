@@ -3,10 +3,10 @@ pub mod helpers;
 use std::{collections::HashMap, string::ToString, sync::OnceLock};
 
 use app_actions::{
-    actions::{handlers::ActionEntry, ActionOptions, AVAILABLE_ACTIONS},
+    actions::{AVAILABLE_ACTIONS, ActionOptions, handlers::ActionEntry},
     downloaders::AVAILABLE_DOWNLOADERS,
     extractors::AVAILABLE_EXTRACTORS,
-    fixers::{handlers::FixerInstance, AVAILABLE_FIXERS},
+    fixers::{AVAILABLE_FIXERS, handlers::FixerInstance},
 };
 use helpers::status_message::StatusMessage;
 use teloxide::{
@@ -16,8 +16,7 @@ use teloxide::{
     types::{LinkPreviewOptions, ParseMode, ReplyParameters},
     utils::command::BotCommands,
 };
-use tracing::{field, info, trace, Instrument, Span};
-use url::Url;
+use tracing::{Instrument, Span, field, info, trace};
 
 use crate::{
     config::Config,
@@ -35,10 +34,8 @@ impl TelegramBot {
         TELEGRAM_BOT.get_or_init(|| {
             let tg_config = Config::bot();
 
-            let api_url = Url::parse(&tg_config.api_url).expect("Invalid API URL");
-
             teloxide::Bot::new(&tg_config.bot_token)
-                .set_api_url(api_url)
+                .set_api_url(tg_config.api_url.clone())
                 .parse_mode(ParseMode::Html)
                 .trace(trace::Settings::TRACE_EVERYTHING)
                 .cache_me()
@@ -326,7 +323,7 @@ async fn handle_command(msg: Message, command: BotCommand) -> ResponseResult<()>
                         "<blockquote>{star}<u>{name}</u>\n{desc}</blockquote>",
                         name = x.name(),
                         desc = x.description(),
-                        star = if x.enabled_by_default() { "" } else { "*" }
+                        star = if x.is_enabled() { "" } else { "*" }
                     )
                 })
                 .collect::<Vec<_>>()

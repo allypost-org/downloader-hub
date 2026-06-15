@@ -6,8 +6,8 @@ use tokio::fs;
 use tracing::{debug, trace};
 
 use crate::fixers::{
-    common::{FixRequest, FixResult, FixerError},
     Fixer, FixerReturn, IntoFixerReturn,
+    common::{FixRequest, FixResult, FixerError},
 };
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -46,17 +46,16 @@ async fn fix_file_extension(request: FixRequest) -> FixerReturn {
     };
     debug!("Inferred file extension: {:?}", file_ext);
 
-    if let Some(extension) = extension {
-        if extension == file_ext {
-            debug!("File extension is correct");
-            return Ok(FixResult::new(request, file_path.clone()));
-        }
+    if let Some(extension) = extension
+        && extension == file_ext
+    {
+        debug!("File extension is correct");
+        return Ok(FixResult::new(request, file_path.clone()));
     }
 
     trace!(
         "File extension is incorrect ({:?} vs ({:?}))",
-        extension,
-        file_ext
+        extension, file_ext
     );
 
     let new_file_path = file_path.with_extension(file_ext);

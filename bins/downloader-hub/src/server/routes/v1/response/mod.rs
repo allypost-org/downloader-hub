@@ -1,15 +1,15 @@
 use axum::{
+    Json,
     extract::rejection::{JsonRejection, QueryRejection},
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use serde::Serialize;
 use thiserror::Error;
 
 use crate::server::{
     app_helpers::pagination::Paginated,
-    app_response::{error::ApiError, ApiResponse},
+    app_response::{ApiResponse, error::ApiError},
 };
 
 pub const API_VERSION: &str = "v1";

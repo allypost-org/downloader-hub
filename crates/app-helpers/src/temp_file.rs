@@ -7,6 +7,7 @@ use std::{
 use super::id::time_thread_id;
 use crate::config::HelpersConfig;
 
+#[derive(Debug)]
 pub struct TempFile {
     path: PathBuf,
     file: File,
@@ -40,7 +41,7 @@ impl TempFile {
         })
     }
 
-    pub fn with_prefix<T>(file_name_prefix: T) -> Result<Self, std::io::Error>
+    pub fn new_with_prefix<T>(file_name_prefix: T) -> Result<Self, std::io::Error>
     where
         T: Into<OsString> + std::marker::Send,
     {
@@ -58,10 +59,32 @@ impl TempFile {
         &mut self.file
     }
 
+    pub fn try_clone_file(&self) -> Result<File, std::io::Error> {
+        self.file.try_clone()
+    }
+
     #[allow(dead_code)]
     pub const fn no_delete_on_drop(&mut self) -> &mut Self {
         self.delete_on_drop = false;
         self
+    }
+}
+
+impl AsRef<Path> for TempFile {
+    fn as_ref(&self) -> &Path {
+        self.path.as_ref()
+    }
+}
+
+impl AsRef<PathBuf> for TempFile {
+    fn as_ref(&self) -> &PathBuf {
+        &self.path
+    }
+}
+
+impl AsRef<File> for TempFile {
+    fn as_ref(&self) -> &File {
+        &self.file
     }
 }
 

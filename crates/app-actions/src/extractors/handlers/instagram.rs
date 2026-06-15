@@ -31,7 +31,7 @@ impl Extractor for Instagram {
 }
 
 static URL_MATCH: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^https?://(www\.)?instagram.com/(p|reel)/(?P<post_id>[^/?]+)")
+    Regex::new(r"^https?://(www\.)?instagram\.com/(p|reels?)/(?P<post_id>[^/?]+)")
         .expect("Invalid regex")
 });
 

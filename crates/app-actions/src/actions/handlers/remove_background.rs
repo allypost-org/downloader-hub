@@ -7,7 +7,7 @@ use app_helpers::{
 };
 use futures::StreamExt;
 use http::header;
-use reqwest::{multipart, Body};
+use reqwest::{Body, multipart};
 use serde::{Deserialize, Serialize};
 use tokio::{fs::File, io::AsyncWriteExt};
 use tokio_util::codec::{BytesCodec, FramedRead};
@@ -16,7 +16,7 @@ use tracing::{trace, warn};
 use crate::{
     actions::{Action, ActionError, ActionRequest, ActionResult},
     common::request::Client,
-    fixers::{handlers::crop_image::CropImage, FixRequest, Fixer},
+    fixers::{FixRequest, Fixer, handlers::crop_image::CropImage},
 };
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]

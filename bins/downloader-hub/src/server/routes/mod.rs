@@ -1,9 +1,9 @@
 use std::any::Any;
 
 use axum::{
+    Router,
     http::StatusCode,
     response::{IntoResponse, Response},
-    Router,
 };
 use tower_http::catch_panic::CatchPanicLayer;
 

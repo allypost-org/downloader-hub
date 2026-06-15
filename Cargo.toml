@@ -1,34 +1,35 @@
 [workspace]
-members = [
-  "crates/*",
-  "bins/*"
-]
+members = ["crates/*", "bins/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.7.0"
+version = "0.8.1"
 authors = ["Allypost"]
 description = "A meme downloader"
-edition = "2021"
+edition = "2024"
 license = "MPL-2.0"
 
 [workspace.dependencies]
 app-actions = { version = "*", path = "crates/app-actions" }
 app-config = { version = "*", path = "crates/app-config" }
+app-database = { version = "*", path = "crates/app-database" }
 app-helpers = { version = "*", path = "crates/app-helpers" }
 app-logger = { version = "*", path = "crates/app-logger" }
 app-macros = { version = "*", path = "crates/app-macros" }
+app-peer-comms = { version = "*", path = "crates/app-peer-comms" }
 app-tasks = { version = "*", path = "crates/app-tasks" }
 anyhow = "1.0.99"
 async-trait = "0.1.89"
 chrono = { version = "0.4.41", features = ["alloc", "serde"] }
 clap = { version = "4.5.49", features = ["derive", "env"] }
+derive_more = { version = "2.0.1", features = ["debug"] }
 futures = { version = "0.3.31", features = ["thread-pool"] }
 serde = { version = "1.0", features = ["derive", "alloc", "rc"] }
 serde_json = { version = "1.0" }
 thiserror = "2.0"
 tokio = { version = "1.47.1", features = ["rt-multi-thread", "macros", "fs", "process"] }
 tracing = { version = "0.1.41" }
+tracing-subscriber = { version = "0.3.20", features = ["env-filter", "parking_lot"] }
 url = { version = "2.5.7", features = ["serde"] }
 validator = "0.20.0"
 
@@ -53,6 +54,7 @@ strip = true
 lto = "thin"
 # panic = "abort"
 codegen-units = 1
+incremental = false
 
 [profile.release-cli]
 inherits = "release"

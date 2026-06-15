@@ -1,7 +1,7 @@
 use std::{collections::HashSet, fmt::Write};
 
 use app_helpers::file_type::{infer_file_type, mime};
-use reqwest::{multipart, Body};
+use reqwest::{Body, multipart};
 use serde::{Deserialize, Serialize};
 use tokio::fs::File;
 use tokio_util::codec::{BytesCodec, FramedRead};
@@ -121,7 +121,7 @@ impl Action for OcrImage {
                         name = self.name(),
                     )
                     .into(),
-                ))
+                ));
             }
         };
 

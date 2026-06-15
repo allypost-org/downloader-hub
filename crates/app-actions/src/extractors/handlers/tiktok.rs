@@ -6,8 +6,7 @@ use url::Url;
 
 use super::{ExtractInfoRequest, ExtractedInfo, Extractor};
 use crate::{
-    common::{request::USER_AGENT, url::UrlWithMeta},
-    downloaders::handlers::generic::Generic,
+    common::url::UrlWithMeta, config::ActionsConfig, downloaders::handlers::generic::Generic,
 };
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -49,6 +48,13 @@ async fn get_media_download_urls(req: &ExtractInfoRequest) -> Result<UrlWithMeta
         .await
         .map_err(|e| format!("Failed to send request to tiktok: {:?}", e))?;
     trace!(?resp, "Got response from tiktok");
+
+    if !resp.status().is_success() {
+        return Err(format!(
+            "Got non-success status code from TikTok: {:?}",
+            resp.status()
+        ));
+    }
 
     let mut resp_cookies = HashMap::<String, String>::new();
     for cookie in resp.cookies() {
@@ -114,10 +120,10 @@ async fn get_media_download_urls(req: &ExtractInfoRequest) -> Result<UrlWithMeta
         .ok_or_else(|| "Failed to get video url from video data".to_string())?;
     trace!(?video_url, "Got video url from video data");
 
-    let download_info = UrlWithMeta::from_url(video_url)
-        .with_header("User-Agent", &USER_AGENT)
+    let download_info = UrlWithMeta::from_url_str(video_url)
+        .with_header("User-Agent", &ActionsConfig::request().user_agent)
         .with_header("Referer", &req.url)
-        .with_header("Cookie", &format!("tt_chain_token={}", csrf_token));
+        .with_header("Cookie", format!("tt_chain_token={}", csrf_token));
 
     Ok(download_info)
 }

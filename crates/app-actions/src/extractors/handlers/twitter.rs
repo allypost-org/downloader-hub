@@ -1,12 +1,12 @@
 use std::{string::ToString, sync::LazyLock};
 
 use app_config::timeframe::Timeframe;
-use http::{header, HeaderMap};
+use http::{HeaderMap, header};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{debug, trace};
-use url::{form_urlencoded, Url};
+use url::Url;
 
 use super::{ExtractInfoRequest, ExtractedInfo, Extractor};
 use crate::{
@@ -26,8 +26,7 @@ pub static MEDIA_URL_MATCH: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^https?://pbs\.twimg\.com/media/").expect("Invalid regex")
 });
 
-static DEFAULT_AUTHORIZATION: &str =
-    "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%\
+static DEFAULT_AUTHORIZATION: &str = "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%\
      3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
 
 static TWEET_INFO_ENDPOINT: &str =
@@ -55,7 +54,7 @@ impl Extractor for Twitter {
         let tweet_info = match get_tweet_info_from_url(request.url.as_str())? {
             Some(x) => x,
             None => {
-                let screenshot_url = self.screenshot_tweet_url_info(request.url.as_str());
+                let screenshot_url = self.screenshot_tweet_url_info(&request.url);
                 return Ok(ExtractedInfo::from_url(request, screenshot_url));
             }
         };
@@ -75,7 +74,7 @@ impl Extractor for Twitter {
         trace!(?tweet_media, "Got tweet media");
 
         if tweet_info.username != "i" {
-            let tweet_screenshot_url = self.screenshot_tweet_url_info(request.url.as_str());
+            let tweet_screenshot_url = self.screenshot_tweet_url_info(&request.url);
 
             trace!("Adding Tweet screenshot URL: {:?}", &tweet_screenshot_url);
             tweet_media.push(tweet_screenshot_url);
@@ -87,20 +86,18 @@ impl Extractor for Twitter {
 
 impl Twitter {
     #[must_use]
-    pub fn screenshot_tweet_url(&self, url: &str) -> String {
-        let endpoint = &ActionsConfig::endpoints().twitter_screenshot_base_url;
+    pub fn screenshot_tweet_url(&self, url: &Url) -> Url {
+        let mut endpoint = ActionsConfig::endpoints()
+            .twitter_screenshot_base_url
+            .clone();
 
-        format!(
-            "{}/{}",
-            endpoint.trim_end_matches('/'),
-            form_urlencoded::Serializer::new(String::new())
-                .append_key_only(url)
-                .finish(),
-        )
+        endpoint.set_path(url.as_str());
+
+        endpoint
     }
 
     #[must_use]
-    pub fn screenshot_tweet_url_info(&self, url: &str) -> ExtractedUrlInfo {
+    pub fn screenshot_tweet_url_info(&self, url: &Url) -> ExtractedUrlInfo {
         ExtractedUrlInfo::new(self.screenshot_tweet_url(url))
             .with_preferred_downloader(Some(Generic))
             .with_downloader_options(Generic::options().with_timeout(Some(Timeframe::Seconds(60))))
@@ -336,11 +333,11 @@ fn get_tweet_media_urls(tweet_data: &TweetData) -> Option<Vec<TweetMedia>> {
 
     trace!(?tweet_media, "Got tweet media");
 
-    if let Some(tm) = &tweet_media {
-        if tm.is_empty() {
-            trace!("No tweet media found");
-            tweet_media = None;
-        }
+    if let Some(tm) = &tweet_media
+        && tm.is_empty()
+    {
+        trace!("No tweet media found");
+        tweet_media = None;
     }
 
     tweet_media

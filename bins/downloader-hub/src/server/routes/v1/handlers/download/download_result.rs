@@ -4,12 +4,12 @@ use app_entities::{
     sea_orm_active_enums::ItemStatus,
 };
 use axum::{
+    Router,
     extract::{OriginalUri, Path, Query},
-    http::{header, HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header},
     middleware,
     response::IntoResponse,
     routing::get,
-    Router,
 };
 use serde::Deserialize;
 use tracing::{error, trace};
@@ -17,12 +17,12 @@ use tracing::{error, trace};
 use crate::{
     db::AppDb,
     server::{
+        AppRouter,
         app_response::range_responder::RangeResponder,
         routes::v1::{
             middleware::auth::require_auth,
             response::{V1Response, V1Result},
         },
-        AppRouter,
     },
     service::{
         download_result::DownloadResultService,

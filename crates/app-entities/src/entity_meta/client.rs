@@ -31,7 +31,7 @@ impl client::Model {
                 return Err(anyhow::anyhow!(format!(
                     "Download folder is not a local path: {dir:?}",
                     dir = self.download_folder,
-                )))
+                )));
             }
         };
 

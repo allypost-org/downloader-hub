@@ -12,12 +12,12 @@ use tracing::{debug, trace, warn};
 use crate::{
     config::ActionsConfig,
     fixers::{
+        Fixer, FixerReturn, IntoFixerReturn,
         common::{
+            FixRequest, FixResult,
             command::CmdError,
             crop_filter::{CropError, CropFilter},
-            FixRequest, FixResult,
         },
-        Fixer, FixerReturn, IntoFixerReturn,
     },
 };
 
@@ -208,7 +208,7 @@ async fn generate_crop_filter(file_path: &Path) -> Result<CropFilter, CropError>
 
             entries.push(path_in_dir);
         }
-        trace!(?entries, "Found all frame files in directory");
+        trace!(entries = ?entries.len(), "Found all frame files in directory");
         entries
     };
 

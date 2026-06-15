@@ -52,8 +52,8 @@ pub fn url_resolves_to_valid_ip(url: &str) -> Result<Url, UrlIpValidationError> 
     let url_reserved_ips = url_ips
         .into_iter()
         .filter(|x| match &x {
-            std::net::IpAddr::V4(ip) => RESERVED_RANGE_IPV4.contains(ip),
-            std::net::IpAddr::V6(ip) => RESERVED_RANGE_IPV6.contains(ip),
+            IpAddr::V4(ip) => RESERVED_RANGE_IPV4.contains(ip),
+            IpAddr::V6(ip) => RESERVED_RANGE_IPV6.contains(ip),
         })
         .collect::<Vec<_>>();
 

@@ -65,6 +65,12 @@ impl TempDir {
         self.delete_on_drop = false;
         self
     }
+
+    #[must_use]
+    pub const fn with_no_delete_on_drop(mut self) -> Self {
+        self.no_delete_on_drop();
+        self
+    }
 }
 
 impl Drop for TempDir {

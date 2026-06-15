@@ -1,8 +1,11 @@
 use std::{env, path::PathBuf};
 
-use directories::ProjectDirs;
+use directories_next::ProjectDirs;
 
-pub static APPLICATION_NAME: &str = "downloader-hub";
+pub static APPLICATION_NAME: &str = match option_env!("APPLICATION_NAME") {
+    Some(name) => name,
+    None => "downloader-hub",
+};
 pub static ORGANIZATION_NAME: &str = "allypost";
 pub static ORGANIZATION_QUALIFIER: &str = "net";
 

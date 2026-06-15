@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use app_entities::{client, entity_meta::common::path::AppPath};
-use sea_orm::{prelude::*, DeleteResult, Set};
+use sea_orm::{DeleteResult, Set, prelude::*};
 use serde::Deserialize;
 use tracing::info;
 

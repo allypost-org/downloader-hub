@@ -9,7 +9,7 @@ use app_entities::{
     sea_orm_active_enums::ItemStatusEnum,
 };
 use app_migration::IntoColumnRef;
-use sea_orm::{prelude::*, InsertResult, Set, TryInsertResult, UpdateResult};
+use sea_orm::{InsertResult, Set, TryInsertResult, UpdateResult, prelude::*};
 use tracing::{trace, warn};
 
 use crate::service::{file::FileService, id::AppUidFor};

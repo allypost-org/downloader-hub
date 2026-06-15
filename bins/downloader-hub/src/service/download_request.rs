@@ -6,13 +6,13 @@ use app_entities::{
     sea_orm_active_enums::ItemStatus,
 };
 use sea_orm::{
-    prelude::*, sea_query::IntoCondition, AccessMode, IsolationLevel, QueryOrder, Set,
-    TransactionError, TransactionTrait, UpdateResult,
+    AccessMode, IsolationLevel, QueryOrder, Set, TransactionError, TransactionTrait, UpdateResult,
+    prelude::*, sea_query::IntoCondition,
 };
 
 use super::id::AppUidFor;
 use crate::{
-    queue::{task::Task, TASK_QUEUE},
+    queue::{TASK_QUEUE, task::Task},
     server::app_helpers::pagination::{Paginated, PaginationQuery},
 };
 

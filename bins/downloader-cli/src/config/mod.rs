@@ -1,13 +1,13 @@
 use std::path::PathBuf;
 
 use app_config::{
+    Dumpable, GlobalConfig,
     common::{self},
     validators::{
         directory::{validate_is_writable_directory, value_parser_parse_valid_directory},
         file::{validate_is_files, value_parser_parse_valid_file},
         print_validation_errors,
     },
-    Dumpable, GlobalConfig,
 };
 use clap::{Args, Parser, ValueHint};
 use serde::{Deserialize, Serialize};
@@ -32,6 +32,14 @@ pub struct Config {
 
     #[clap(flatten)]
     #[validate(nested)]
+    pub disabled_entries: common::DisabledEntriesConfig,
+
+    #[clap(flatten)]
+    #[validate(nested)]
+    pub request: common::RequestConfig,
+
+    #[clap(flatten)]
+    #[validate(nested)]
     #[serde(skip)]
     dump: DumpConfig,
 }
@@ -45,7 +53,12 @@ impl Config {
 
         {
             let parsed = parsed.clone();
-            app_actions::config::init(parsed.endpoint, parsed.dependency_paths)?;
+            app_actions::config::init(
+                parsed.endpoint,
+                parsed.dependency_paths,
+                parsed.disabled_entries.entries,
+                parsed.request,
+            )?;
         }
 
         Self::init(parsed)

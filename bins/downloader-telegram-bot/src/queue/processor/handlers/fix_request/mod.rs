@@ -1,4 +1,4 @@
-use app_actions::fixers::{fix_file_with, FixRequest};
+use app_actions::fixers::{FixRequest, fix_file_with};
 use app_helpers::temp_dir::TempDir;
 use tracing::{info, trace};
 

@@ -1,10 +1,11 @@
 use clap::{Args, ValueHint};
 use serde::{Deserialize, Serialize};
+use url::Url;
 use validator::Validate;
 
 use crate::validators::{
     str::value_parser_ensure_min_length,
-    url::{validate_is_absolute_url, value_parser_parse_absolute_url},
+    url::{validate_url_is_absolute_url, value_parser_parse_absolute_url},
 };
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, Args, Validate)]
@@ -58,13 +59,21 @@ pub struct DatabaseConfig {
     pub url: String,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Args, Validate)]
+#[derive(Debug, Clone, Serialize, Deserialize, Args, Validate)]
 #[clap(next_help_heading = "Application options")]
 pub struct AppConfig {
     /// The public URL where the application is served.
     /// This is used to generate links to the application.
     /// Should be in the format of `https://www.example.com/some/path` or `http://127.0.0.1:8000`
     #[clap(long, env = "DOWNLOADER_HUB_PUBLIC_URL", value_hint = ValueHint::Url, value_parser = value_parser_parse_absolute_url())]
-    #[validate(custom(function = "validate_is_absolute_url"))]
-    pub public_url: String,
+    #[validate(custom(function = "validate_url_is_absolute_url"))]
+    pub public_url: Url,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            public_url: Url::parse("http://127.0.0.1:8000").expect("Invalid URL"),
+        }
+    }
 }

@@ -6,7 +6,7 @@ pub mod split_scenes;
 
 use std::sync::{Arc, LazyLock};
 
-use futures::{stream::FuturesUnordered, StreamExt};
+use futures::{StreamExt, stream::FuturesUnordered};
 use tracing::trace;
 
 use super::{Action, ActionError, ActionRequest, ActionResult};
@@ -33,6 +33,10 @@ fn available_actions() -> Vec<ActionEntry> {
         all_actions()
             .into_iter()
             .map(|x| async move {
+                if !x.is_enabled() {
+                    trace!(?x, "Action is disabled");
+                    return (x, false);
+                }
                 trace!(?x, "Checking if action can run");
                 let can_run = x.can_run().await;
                 trace!(?x, can_run, "Checked if action can run");

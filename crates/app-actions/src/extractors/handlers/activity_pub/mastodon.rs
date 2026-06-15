@@ -4,10 +4,10 @@ use serde::Deserialize;
 use tracing::{debug, trace};
 use url::Url;
 
-use super::{node_info::NodeInfo, APHandler, HandleResult};
+use super::{APHandler, HandleResult, node_info::NodeInfo};
 use crate::{
     common::request::Client,
-    extractors::{handlers::twitter::Twitter, ExtractedUrlInfo},
+    extractors::{ExtractedUrlInfo, handlers::twitter::Twitter},
 };
 
 #[derive(Debug)]
@@ -21,19 +21,19 @@ impl APHandler for MastodonHandler {
 
     #[tracing::instrument]
     async fn handle(&self, info: &NodeInfo, url: &str) -> Result<HandleResult, String> {
-        let parsed_url = Url::parse(url).map_err(|e| e.to_string())?;
+        let url = Url::parse(url).map_err(|e| e.to_string())?;
 
-        let toot_id = parsed_url
+        let toot_id = url
             .path_segments()
             .and_then(Iterator::last)
             .unwrap_or_default();
 
-        let toot_info = TootInfo::from_id(&parsed_url, toot_id).await?;
+        let toot_info = TootInfo::from_id(&url, toot_id).await?;
 
         debug!(?toot_info, "Got toot info");
 
         let toot_url = &toot_info.url;
-        if toot_url.host_str() != parsed_url.host_str() {
+        if toot_url.host_str() != url.host_str() {
             return Ok(HandleResult::Delegated {
                 url: toot_url.to_string(),
             });
@@ -45,7 +45,7 @@ impl APHandler for MastodonHandler {
             .map(|x| x.to_string().into())
             .collect::<Vec<ExtractedUrlInfo>>();
 
-        urls.push(Twitter.screenshot_tweet_url_info(url));
+        urls.push(Twitter.screenshot_tweet_url_info(&url));
 
         Ok(HandleResult::Handled(urls))
     }

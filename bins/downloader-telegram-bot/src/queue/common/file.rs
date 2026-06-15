@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use app_actions::fixers::{handlers::file_extensions::FileExtension, FixRequest, Fixer};
+use app_actions::fixers::{FixRequest, Fixer, handlers::file_extensions::FileExtension};
 use app_helpers::{file_type::mime, id::time_thread_id};
 use teloxide::{
     net::Download,
@@ -44,8 +44,7 @@ impl FileId {
 
         trace!(
             "Downloading message file {:?} to: {:?}",
-            &file_id,
-            &download_file_path
+            &file_id, &download_file_path
         );
 
         let mut file = File::create(&download_file_path)

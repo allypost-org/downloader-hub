@@ -4,7 +4,7 @@ use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
 use super::task::Task;
-use crate::queue::{task::TaskInfo, TASK_QUEUE};
+use crate::queue::{TASK_QUEUE, task::TaskInfo};
 
 mod download_request;
 mod download_result;

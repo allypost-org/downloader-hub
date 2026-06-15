@@ -12,7 +12,6 @@ pub type FixerInstance = Arc<dyn Fixer + Send + Sync>;
 
 pub static ALL_FIXERS: LazyLock<Vec<FixerInstance>> = LazyLock::new(all_fixers);
 pub static AVAILABLE_FIXERS: LazyLock<Vec<FixerInstance>> = LazyLock::new(available_fixers);
-pub static ENABLED_FIXERS: LazyLock<Vec<FixerInstance>> = LazyLock::new(enabled_fixers);
 
 fn all_fixers() -> Vec<FixerInstance> {
     vec![
@@ -25,12 +24,8 @@ fn all_fixers() -> Vec<FixerInstance> {
 }
 
 fn available_fixers() -> Vec<FixerInstance> {
-    all_fixers().into_iter().filter(|f| f.can_run()).collect()
-}
-
-fn enabled_fixers() -> Vec<FixerInstance> {
-    available_fixers()
+    all_fixers()
         .into_iter()
-        .filter(|f| f.enabled_by_default())
+        .filter(|f| f.can_run() && f.is_enabled())
         .collect()
 }

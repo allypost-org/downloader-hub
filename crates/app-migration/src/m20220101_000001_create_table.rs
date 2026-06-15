@@ -4,7 +4,7 @@ use sea_orm_migration::{
     sea_query::extension::postgres::Type,
 };
 
-use crate::common::{generate_index, GenKeyType};
+use crate::common::{GenKeyType, generate_index};
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;

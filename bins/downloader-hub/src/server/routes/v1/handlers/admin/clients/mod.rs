@@ -1,19 +1,19 @@
 use app_entities::entity_meta::client::ClientWithHidden;
 use axum::{
+    Json, Router,
     extract::{Path, Query},
     http::StatusCode,
     routing::get,
-    Json, Router,
 };
 use axum_extra::extract::WithRejection;
-use sea_orm::{prelude::*, QueryOrder};
+use sea_orm::{QueryOrder, prelude::*};
 
 use crate::{
     db::AppDb,
     server::{
+        AppRouter,
         app_helpers::pagination::{Paginated, PaginationQuery},
         routes::v1::response::{V1Error, V1Response, V1Result},
-        AppRouter,
     },
     service::client::{ClientCreateError, ClientCreatePayload, ClientService},
 };
@@ -50,7 +50,7 @@ async fn add_client(
                 return Err(V1Response::error(
                     StatusCode::CONFLICT,
                     "Client with this name already exists",
-                ))
+                ));
             }
             _ => {
                 return Err(V1Response::error(

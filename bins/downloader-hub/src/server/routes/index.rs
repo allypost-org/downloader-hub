@@ -1,8 +1,8 @@
-use axum::{extract::State, http::StatusCode, routing::any, Router};
-use sea_orm::{prelude::*, Statement};
+use axum::{Router, extract::State, http::StatusCode, routing::any};
+use sea_orm::{Statement, prelude::*};
 use tracing::debug;
 
-use crate::server::{app_response::ApiResponse, AppRouter, AppState};
+use crate::server::{AppRouter, AppState, app_response::ApiResponse};
 
 pub(super) fn router() -> AppRouter {
     Router::new()

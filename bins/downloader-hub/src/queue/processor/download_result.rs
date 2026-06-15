@@ -55,7 +55,7 @@ async fn fix(request_id: i32, app_path: AppPath) -> Result<(), HandlerError> {
             return Err(HandlerError::Fatal(format!(
                 "Cannot process path: {:?}",
                 app_path
-            )))
+            )));
         }
     };
 

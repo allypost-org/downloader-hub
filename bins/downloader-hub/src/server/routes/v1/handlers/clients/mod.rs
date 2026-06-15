@@ -1,11 +1,11 @@
-use axum::{middleware, routing::get, Extension, Router};
+use axum::{Extension, Router, middleware, routing::get};
 
 use crate::server::{
+    AppRouter,
     routes::v1::{
-        middleware::auth::{require_auth, CurrentUser},
+        middleware::auth::{CurrentUser, require_auth},
         response::V1Response,
     },
-    AppRouter,
 };
 
 pub(super) fn router() -> AppRouter {

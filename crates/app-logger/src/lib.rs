@@ -1,7 +1,7 @@
 use std::{env, sync::OnceLock};
 
-use tracing::{warn, Level};
-use tracing_subscriber::{filter::Directive, fmt, prelude::*, EnvFilter};
+use tracing::{Level, debug, trace, warn};
+use tracing_subscriber::{EnvFilter, filter::Directive, fmt, prelude::*};
 
 #[allow(clippy::type_complexity)]
 static RELOAD_HANDLE: OnceLock<
@@ -21,17 +21,25 @@ static RELOAD_HANDLE: OnceLock<
 
 pub const COMPONENT_LEVELS: &[(&str, Level)] = &[
     // Binaries
+    ("downloader_bot", Level::INFO),
+    ("downloader_central", Level::INFO),
+    ("downloader_cli", Level::INFO),
     ("downloader_hub", Level::INFO),
     ("downloader_telegram_bot", Level::INFO),
+    ("downloader_worker", Level::INFO),
     // Libraries
     ("app_actions", Level::INFO),
     ("app_config", Level::INFO),
+    ("app_database", Level::INFO),
     ("app_helpers", Level::INFO),
     ("app_logger", Level::INFO),
+    ("app_macros", Level::INFO),
+    ("app_peer_comms", Level::INFO),
     ("app_tasks", Level::INFO),
     // Other
     ("app", Level::INFO),
     ("request", Level::INFO),
+    ("peering", Level::INFO),
     // External
 ];
 
@@ -129,6 +137,8 @@ pub fn set_log_level(log_level: &str) -> Result<(), Box<dyn std::error::Error>> 
 }
 
 pub fn update_log_level(log_level: &str) -> Result<(), Box<dyn std::error::Error>> {
+    debug!(?log_level, "Updating log level");
+
     let default_levels = COMPONENT_LEVELS.iter().map(|(k, v)| {
         if k.is_empty() {
             v.to_string()
@@ -143,6 +153,9 @@ pub fn update_log_level(log_level: &str) -> Result<(), Box<dyn std::error::Error
         .clone_current()
         .expect("Failed to clone current log level")
         .to_string();
+
+    trace!(?current_levels, "Current log levels");
+
     let current_levels = current_levels
         .split(',')
         .map(std::string::ToString::to_string);
@@ -154,6 +167,8 @@ pub fn update_log_level(log_level: &str) -> Result<(), Box<dyn std::error::Error
         .chain(new_levels)
         .collect::<Vec<_>>()
         .join(",");
+
+    trace!(?levels, "New log levels");
 
     set_log_level(&levels)
 }

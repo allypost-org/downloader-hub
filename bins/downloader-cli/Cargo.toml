@@ -16,13 +16,7 @@ futures.workspace = true
 serde.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-tracing-subscriber = { version = "0.3.20", features = [
-    "env-filter",
-    "json",
-    "local-time",
-    "time",
-    "parking_lot",
-] }
+tracing-subscriber.workspace = true
 url.workspace = true
 validator.workspace = true
 

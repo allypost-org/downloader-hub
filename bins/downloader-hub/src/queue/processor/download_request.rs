@@ -6,13 +6,13 @@ use app_entities::{
     entity_meta::{common::path::AppPath, download_result::DownloadResultStatus},
 };
 use app_helpers::ip::url_resolves_to_valid_ip;
-use sea_orm::{prelude::*, TransactionTrait};
+use sea_orm::{TransactionTrait, prelude::*};
 use tracing::{debug, error, info, warn};
 
 use super::HandlerError;
 use crate::{
     db::AppDb,
-    queue::{task::Task, TASK_QUEUE},
+    queue::{TASK_QUEUE, task::Task},
     service::{
         download_request::{DownloadRequestService, DownloadRequestStatus},
         download_result::{CreateDownloadResultPayload, DownloadResultService},
@@ -116,7 +116,7 @@ async fn download(uid: &str) -> Result<(download_request::Model, Vec<AppPath>), 
                             },
                             Err(e) => CreateDownloadResultPayload {
                                 request_id: request.id,
-                                status: DownloadResultStatus::Failed(e.clone()),
+                                status: DownloadResultStatus::Failed(e.clone().original_message()),
                                 path: None,
                                 meta: None,
                             },

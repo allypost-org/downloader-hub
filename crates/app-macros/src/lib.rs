@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, DeriveInput};
+use syn::{DeriveInput, parse_macro_input};
 
 #[proc_macro_derive(GlobalConfig)]
 pub fn global_config_derive(input: TokenStream) -> TokenStream {
@@ -22,6 +22,12 @@ pub fn global_config_derive(input: TokenStream) -> TokenStream {
             pub fn global() -> &'static Self {
                 Self::get_global()
                     .expect(&format!("Config not initialized for {}", stringify!(#name)))
+            }
+
+            #[must_use]
+            #[inline]
+            pub fn global_initialized() -> bool {
+                Self::initialized_global()
             }
 
             #[must_use]

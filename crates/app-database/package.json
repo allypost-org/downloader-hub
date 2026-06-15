@@ -1,0 +1,20 @@
+{
+  "name": "downloader-hub",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "convex dev"
+  },
+  "keywords": [],
+  "author": "",
+  "private": true,
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "convex": "^1.29.2",
+    "convex-helpers": "^0.1.105",
+    "lodash": "^4.17.21"
+  },
+  "devDependencies": {
+    "@types/lodash": "^4.17.20"
+  }
+}

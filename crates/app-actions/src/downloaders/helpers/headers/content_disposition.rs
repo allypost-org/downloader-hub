@@ -79,6 +79,7 @@ impl fmt::Display for ExtendedValue {
 }
 
 /// Split at the index of the first `needle` if it exists or at the end.
+#[inline]
 fn split_once(haystack: &str, needle: char) -> (&str, &str) {
     haystack.find(needle).map_or_else(
         || (haystack, ""),
@@ -91,6 +92,7 @@ fn split_once(haystack: &str, needle: char) -> (&str, &str) {
 
 /// Split at the index of the first `needle` if it exists or at the end, trim the right of the
 /// first part and the left of the last part.
+#[inline]
 fn split_once_and_trim(haystack: &str, needle: char) -> (&str, &str) {
     let (first, last) = split_once(haystack, needle);
     (first.trim_end(), last.trim_start())
@@ -236,9 +238,7 @@ impl DispositionParam {
     #[inline]
     pub fn as_unknown<T: AsRef<str>>(&self, name: T) -> Option<&str> {
         match self {
-            Self::Unknown(ref ext_name, ref value)
-                if ext_name.eq_ignore_ascii_case(name.as_ref()) =>
-            {
+            Self::Unknown(ext_name, value) if ext_name.eq_ignore_ascii_case(name.as_ref()) => {
                 Some(value.as_str())
             }
             _ => None,
@@ -250,9 +250,7 @@ impl DispositionParam {
     #[inline]
     pub fn as_unknown_ext<T: AsRef<str>>(&self, name: T) -> Option<&ExtendedValue> {
         match self {
-            Self::UnknownExt(ref ext_name, ref value)
-                if ext_name.eq_ignore_ascii_case(name.as_ref()) =>
-            {
+            Self::UnknownExt(ext_name, value) if ext_name.eq_ignore_ascii_case(name.as_ref()) => {
                 Some(value)
             }
             _ => None,
@@ -473,7 +471,7 @@ impl fmt::Display for DispositionType {
             Self::Inline => write!(f, "inline"),
             Self::Attachment => write!(f, "attachment"),
             Self::FormData => write!(f, "form-data"),
-            Self::Ext(ref s) => write!(f, "{}", s),
+            Self::Ext(s) => write!(f, "{}", s),
         }
     }
 }
@@ -520,24 +518,24 @@ impl fmt::Display for DispositionParam {
         });
 
         match self {
-            Self::Name(ref value) => write!(f, "name={}", value),
+            Self::Name(value) => write!(f, "name={}", value),
 
-            Self::Filename(ref value) => {
+            Self::Filename(value) => {
                 write!(f, "filename=\"{}\"", RE.replace_all(value, "\\$0").as_ref())
             }
 
-            Self::Unknown(ref name, ref value) => write!(
+            Self::Unknown(name, value) => write!(
                 f,
                 "{}=\"{}\"",
                 name,
                 &RE.replace_all(value, "\\$0").as_ref()
             ),
 
-            Self::FilenameExt(ref ext_value) => {
+            Self::FilenameExt(ext_value) => {
                 write!(f, "filename*={}", ext_value)
             }
 
-            Self::UnknownExt(ref name, ref ext_value) => {
+            Self::UnknownExt(name, ext_value) => {
                 write!(f, "{}*={}", name, ext_value)
             }
         }

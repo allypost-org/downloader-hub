@@ -3,7 +3,7 @@ use app_helpers::temp_dir::TempDir;
 use tracing::{info, trace};
 
 use super::{Handler, HandlerError, HandlerReturn};
-use crate::queue::{common::file::FileId, task::TaskInfo, Task};
+use crate::queue::{Task, common::file::FileId, task::TaskInfo};
 
 #[derive(Clone, Debug)]
 pub struct ActionRequestHandler;

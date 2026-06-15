@@ -13,7 +13,7 @@ use zip::ZipArchive;
 use super::Handler;
 use crate::{
     common::request::Client,
-    downloaders::{handlers::generic::Generic, DownloadRequest, Downloader},
+    downloaders::{DownloadRequest, Downloader, handlers::generic::Generic},
 };
 
 const API_URL: &str = "https://yams.tf/api";
@@ -53,16 +53,14 @@ impl Handler for YamsProvider {
         debug!("Downloading song");
         let download_start = Instant::now();
         let download_url = Self::get_download_url(song_url).await.map_err(|e| {
-            if let Some(e) = e.downcast_ref::<reqwest::Error>() {
-                if e.is_timeout() {
-                    warn!(
-                        ?e,
-                        "Timeout downloading song. Download provider may be down."
-                    );
-                    return anyhow::anyhow!(
-                        "Timeout downloading song. Download provider may be down."
-                    );
-                }
+            if let Some(e) = e.downcast_ref::<reqwest::Error>()
+                && e.is_timeout()
+            {
+                warn!(
+                    ?e,
+                    "Timeout downloading song. Download provider may be down."
+                );
+                return anyhow::anyhow!("Timeout downloading song. Download provider may be down.");
             }
             warn!(?e, "Failed to download song");
             anyhow::anyhow!("Failed to download song from provider")
