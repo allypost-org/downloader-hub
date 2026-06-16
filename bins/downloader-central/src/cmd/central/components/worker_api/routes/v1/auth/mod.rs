@@ -21,7 +21,7 @@ pub async fn post_token(Json(body): Json<PostTokenBody>) -> impl IntoResponse {
         Err(e) => {
             error!(?e, "Failed to get authed info");
             return super::V1Response::err(
-                reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+                http::StatusCode::INTERNAL_SERVER_ERROR,
                 "Something went wrong while checking token",
             );
         }
@@ -29,7 +29,7 @@ pub async fn post_token(Json(body): Json<PostTokenBody>) -> impl IntoResponse {
 
     let info = match info {
         AuthedInfoResponse::NotAuthorized { error } => {
-            return super::V1Response::err(reqwest::StatusCode::UNAUTHORIZED, error);
+            return super::V1Response::err(http::StatusCode::UNAUTHORIZED, error);
         }
         AuthedInfoResponse::Authorized(info) => info,
     };
@@ -48,7 +48,7 @@ pub async fn post_token(Json(body): Json<PostTokenBody>) -> impl IntoResponse {
         Err(e) => {
             error!(?e, "Failed to generate JWTs");
             return super::V1Response::err(
-                reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+                http::StatusCode::INTERNAL_SERVER_ERROR,
                 "Something went wrong while generating JWTs",
             );
         }
@@ -74,16 +74,13 @@ pub async fn post_refresh(Json(body): Json<PostRefreshBody>) -> impl IntoRespons
         Ok(x) => x,
         Err(e) => {
             error!(?e, "Failed to parse refresh token");
-            return super::V1Response::err(
-                reqwest::StatusCode::UNAUTHORIZED,
-                "Invalid refresh token",
-            );
+            return super::V1Response::err(http::StatusCode::UNAUTHORIZED, "Invalid refresh token");
         }
     };
 
     if !token_data.is_refresh() {
         return super::V1Response::err(
-            reqwest::StatusCode::UNAUTHORIZED,
+            http::StatusCode::UNAUTHORIZED,
             "Invalid refresh token type",
         );
     }
@@ -96,7 +93,7 @@ pub async fn post_refresh(Json(body): Json<PostRefreshBody>) -> impl IntoRespons
         Err(e) => {
             error!(?e, "Failed to get authed info");
             return super::V1Response::err(
-                reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+                http::StatusCode::INTERNAL_SERVER_ERROR,
                 "Something went wrong while checking token",
             );
         }
@@ -104,7 +101,7 @@ pub async fn post_refresh(Json(body): Json<PostRefreshBody>) -> impl IntoRespons
 
     let info = match info {
         AuthedInfoResponse::NotAuthorized { error } => {
-            return super::V1Response::err(reqwest::StatusCode::UNAUTHORIZED, error);
+            return super::V1Response::err(http::StatusCode::UNAUTHORIZED, error);
         }
         AuthedInfoResponse::Authorized(info) => info,
     };
@@ -123,7 +120,7 @@ pub async fn post_refresh(Json(body): Json<PostRefreshBody>) -> impl IntoRespons
         Err(e) => {
             error!(?e, "Failed to generate JWTs");
             return super::V1Response::err(
-                reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+                http::StatusCode::INTERNAL_SERVER_ERROR,
                 "Something went wrong while generating JWTs",
             );
         }

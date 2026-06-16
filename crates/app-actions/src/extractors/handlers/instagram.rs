@@ -1,5 +1,6 @@
 use std::{result::Result, sync::LazyLock};
 
+use app_requests::Client;
 use http::StatusCode;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -7,7 +8,7 @@ use tracing::{debug, trace};
 use url::Url;
 
 use super::{ExtractInfoRequest, Extractor};
-use crate::{common::request::Client, extractors::ExtractedInfo};
+use crate::extractors::ExtractedInfo;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Instagram;

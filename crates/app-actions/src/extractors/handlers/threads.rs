@@ -1,6 +1,7 @@
 use std::sync::LazyLock;
 
 use app_helpers::tree_yielder::TreeYielder;
+use app_requests::Client;
 use http::{HeaderName, HeaderValue};
 use regex::Regex;
 use scraper::{Html, Selector};
@@ -8,10 +9,7 @@ use serde::{Deserialize, Serialize};
 use tracing::trace;
 use url::Url;
 
-use crate::{
-    common::request::Client,
-    extractors::{ExtractInfoRequest, ExtractedInfo, Extractor},
-};
+use crate::extractors::{ExtractInfoRequest, ExtractedInfo, Extractor};
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Threads;

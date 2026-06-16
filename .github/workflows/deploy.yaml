@@ -137,14 +137,12 @@ jobs:
           AWS_SESSION_TOKEN: ${{ secrets.CACHE_AWS_SESSION_TOKEN }}
         with:
           context: .
-          file: ./.docker/pure-binary/Dockerfile
+          file: ./.docker/downloader-bot/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
           pull: true
           tags: |
             allypost/downloader-bot:latest
             allypost/downloader-bot:${{ github.sha }}
-          build-args: |
-            BINARY_NAME=downloader-bot
           cache-from: type=s3,region=${{ vars.CACHE_AWS_REGION }},bucket=${{ vars.CACHE_AWS_BUCKET_NAME }},endpoint_url=${{ vars.CACHE_AWS_ENDPOINT_URL_S3 }},use_path_style=true
           cache-to: type=s3,region=${{ vars.CACHE_AWS_REGION }},bucket=${{ vars.CACHE_AWS_BUCKET_NAME }},endpoint_url=${{ vars.CACHE_AWS_ENDPOINT_URL_S3 }},use_path_style=true,upload_parallelism=8,touch_refresh=1h,mode=max
 

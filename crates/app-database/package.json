@@ -10,7 +10,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "convex": "^1.29.2",
+    "convex": "^1.41.0",
     "convex-helpers": "^0.1.105",
     "lodash": "^4.17.21"
   },

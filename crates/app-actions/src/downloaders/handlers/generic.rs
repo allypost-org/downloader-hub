@@ -2,6 +2,7 @@ use std::{ffi::OsString, path::PathBuf, string::ToString};
 
 use app_config::{common::Size, timeframe::Timeframe};
 use app_helpers::id::time_id;
+use app_requests::Client;
 use http::header;
 use mime2ext::mime2ext;
 use serde::{Deserialize, Serialize};
@@ -11,10 +12,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use url::Url;
 
 use super::{DownloadRequest, DownloadResult, Downloader, DownloaderError, DownloaderReturn};
-use crate::{
-    common::request::Client,
-    downloaders::{DownloaderOptions, helpers::headers::content_disposition},
-};
+use crate::downloaders::{DownloaderOptions, helpers::headers::content_disposition};
 
 pub const MAX_FILENAME_LENGTH: usize = 120;
 

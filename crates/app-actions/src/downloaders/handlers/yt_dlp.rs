@@ -2,7 +2,7 @@ use std::{
     io::Write,
     ops::Sub,
     path::PathBuf,
-    process,
+    process::{self, Stdio},
     time::{Duration, SystemTime},
 };
 
@@ -153,7 +153,7 @@ impl YtDlp {
                 // .arg("--verbose")
                 .arg(request.url.url().as_str());
 
-            cmd
+            cmd.stdin(Stdio::null())
         };
         debug!("Running cmd: {:?}", &cmd);
         let cmd_output = cmd.output().await;

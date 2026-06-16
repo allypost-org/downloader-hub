@@ -51,7 +51,10 @@ impl Tumblr {
 
 impl Tumblr {
     pub async fn fetch_post_media(url: &Url) -> Result<Vec<ExtractedUrlInfo>, String> {
-        let html = reqwest::get(url.clone())
+        let html = app_requests::Client::base()
+            .map_err(|e| format!("Failed to create client: {}", e))?
+            .get(url.clone())
+            .send()
             .await
             .map_err(|e| format!("Failed to get tumblr post: {}", e))?
             .error_for_status()

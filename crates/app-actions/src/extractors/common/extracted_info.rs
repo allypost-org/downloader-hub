@@ -1,12 +1,13 @@
 use std::{collections::HashMap, sync::Arc};
 
+use app_requests::UrlWithMeta;
 use http::header::IntoHeaderName;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
 use super::extract_info_request::ExtractInfoRequest;
 use crate::{
-    common::{fallible::TaskFallible, url::UrlWithMeta},
+    common::fallible::TaskFallible,
     downloaders::{Downloader, DownloaderOptions},
 };
 

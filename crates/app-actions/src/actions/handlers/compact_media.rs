@@ -1,3 +1,5 @@
+use std::process::Stdio;
+
 use app_helpers::{
     file_name::file_name_with_suffix,
     file_type::{infer_file_type, mime},
@@ -52,7 +54,8 @@ impl Action for CompactMedia {
             .args(["-preset", "slow"])
             .args(["-movflags", "+faststart"])
             .args(["-map_metadata", "-1"])
-            .arg(&output_file_path);
+            .arg(&output_file_path)
+            .stdin(Stdio::null());
 
         trace!("Running command: {cmd:?}");
 

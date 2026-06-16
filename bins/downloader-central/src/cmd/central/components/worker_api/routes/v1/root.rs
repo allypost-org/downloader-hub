@@ -21,20 +21,20 @@ pub async fn get_join_ticket(headers: HeaderMap) -> impl IntoResponse {
 
     let Some(auth_header) = headers.get("Authorization").and_then(|v| v.to_str().ok()) else {
         return super::V1Response::err(
-            reqwest::StatusCode::UNAUTHORIZED,
+            http::StatusCode::UNAUTHORIZED,
             "Missing Authorization header",
         );
     };
     let Some((auth_type, token)) = auth_header.split_once(' ') else {
         return super::V1Response::err(
-            reqwest::StatusCode::UNAUTHORIZED,
+            http::StatusCode::UNAUTHORIZED,
             "Invalid Authorization header: must be `Bearer <token>`",
         );
     };
 
     if auth_type.to_lowercase() != "bearer" {
         return super::V1Response::err(
-            reqwest::StatusCode::UNAUTHORIZED,
+            http::StatusCode::UNAUTHORIZED,
             "Invalid Authorization header: must be `Bearer <token>`",
         );
     }
@@ -49,7 +49,7 @@ pub async fn get_join_ticket(headers: HeaderMap) -> impl IntoResponse {
         Err(e) => {
             error!(?e, "Failed to get authed info");
             return super::V1Response::err(
-                reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+                http::StatusCode::INTERNAL_SERVER_ERROR,
                 "Something went wrong while checking token",
             );
         }
@@ -57,7 +57,7 @@ pub async fn get_join_ticket(headers: HeaderMap) -> impl IntoResponse {
 
     let info = match res {
         AuthedInfoResponse::NotAuthorized { error } => {
-            return super::V1Response::err(reqwest::StatusCode::UNAUTHORIZED, error);
+            return super::V1Response::err(http::StatusCode::UNAUTHORIZED, error);
         }
         AuthedInfoResponse::Authorized(info) => info,
     };
@@ -76,7 +76,7 @@ pub async fn get_join_ticket(headers: HeaderMap) -> impl IntoResponse {
         Err(e) => {
             error!(?e, "Failed to generate JWTs");
             return super::V1Response::err(
-                reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+                http::StatusCode::INTERNAL_SERVER_ERROR,
                 "Something went wrong while generating JWTs",
             );
         }
@@ -114,7 +114,7 @@ pub async fn any_ws(
 ) -> impl IntoResponse {
     let Some(negotiated) = Negotiated::negotiate(&headers) else {
         return super::V1Response::<()>::err(
-            reqwest::StatusCode::NOT_ACCEPTABLE,
+            http::StatusCode::NOT_ACCEPTABLE,
             "No acceptable content type",
         )
         .into_response();

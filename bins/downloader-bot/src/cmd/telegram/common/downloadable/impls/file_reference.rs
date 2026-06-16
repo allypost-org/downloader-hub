@@ -32,7 +32,7 @@ impl Downloadable for FileReference {
                     })
                     .collect();
 
-                let mut resp = reqwest::Client::builder()
+                let mut resp = app_requests::Client::builder()
                     .build()?
                     .request(url.method.parse()?, url.url.clone())
                     .headers(headers)

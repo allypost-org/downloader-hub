@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-ARG RUST_VERSION='1.94'
+ARG RUST_VERSION='1.96'
 ARG RUST_TARGET='x86_64-unknown-linux-musl'
 ARG BINARY_NAME='downloader-worker'
 

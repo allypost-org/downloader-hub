@@ -1,6 +1,7 @@
 use std::{string::ToString, sync::LazyLock};
 
 use app_config::timeframe::Timeframe;
+use app_requests::Client;
 use http::{HeaderMap, header};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -10,8 +11,7 @@ use url::Url;
 
 use super::{ExtractInfoRequest, ExtractedInfo, Extractor};
 use crate::{
-    common::request::Client, config::ActionsConfig, downloaders::handlers::generic::Generic,
-    extractors::ExtractedUrlInfo,
+    config::ActionsConfig, downloaders::handlers::generic::Generic, extractors::ExtractedUrlInfo,
 };
 
 pub static URL_MATCH: LazyLock<Regex> = LazyLock::new(|| {

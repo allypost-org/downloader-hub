@@ -53,7 +53,7 @@ impl RpcClient {
 
         trace!(target: PeeringEndpoint::trace_span_name(), ?msg, "Sending RPC request");
 
-        let resp = reqwest::Client::builder()
+        let resp = app_requests::Client::builder()
             .build()
             .map_err(RpcClientError::BuildClient)?
             .post(Self::rpc_url().clone())
@@ -94,16 +94,16 @@ impl RpcClient {
 #[derive(Debug, thiserror::Error)]
 pub enum RpcClientError {
     #[error("Failed to build client: {0}")]
-    BuildClient(reqwest::Error),
+    BuildClient(app_requests::reqwest::Error),
 
     #[error("Failed to send request: {0}")]
-    SendRequest(reqwest::Error),
+    SendRequest(app_requests::reqwest::Error),
 
     #[error("Request failed with status code: {0}")]
-    ErrorStatus(reqwest::Error),
+    ErrorStatus(app_requests::reqwest::Error),
 
     #[error("Failed to read response: {0}")]
-    ReadResponse(reqwest::Error),
+    ReadResponse(app_requests::reqwest::Error),
 
     #[error("Got error response: {0}")]
     ErrorResponse(String),

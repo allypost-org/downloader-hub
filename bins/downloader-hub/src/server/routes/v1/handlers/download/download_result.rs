@@ -99,6 +99,7 @@ async fn download_result(
             .into_response());
     }
 
+    #[allow(clippy::result_large_err)]
     let result_meta = result.meta().map(|x| match x {
         DownloadResultMeta::FileData(_) => Ok(x),
         DownloadResultMeta::Error(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, e).into_response()),

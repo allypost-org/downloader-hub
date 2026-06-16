@@ -1,7 +1,10 @@
 use std::{collections::HashSet, fmt::Write};
 
 use app_helpers::file_type::{infer_file_type, mime};
-use reqwest::{Body, multipart};
+use app_requests::{
+    Client,
+    reqwest::{Body, multipart},
+};
 use serde::{Deserialize, Serialize};
 use tokio::fs::File;
 use tokio_util::codec::{BytesCodec, FramedRead};
@@ -9,7 +12,6 @@ use tracing::trace;
 
 use crate::{
     actions::{Action, ActionError, ActionRequest, ActionResult},
-    common::request::Client,
     config::ActionsConfig,
 };
 

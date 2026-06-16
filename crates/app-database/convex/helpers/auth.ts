@@ -13,14 +13,14 @@ export const authedQuery = customQuery(
   query,
   customAuthed({
     isMutation: false,
-  })
+  }),
 );
 
 export const authedMutation = customMutation(
   mutation,
   customAuthed({
     isMutation: true,
-  })
+  }),
 );
 
 type CustomAuthedExtraParams = {
@@ -62,7 +62,7 @@ function customAuthed(params: CustomAuthedTopParams) {
 
 function checkAuth(
   token: Doc<typeof authedId> | null,
-  params: CustomAuthedExtraParams & CustomAuthedTopParams
+  params: CustomAuthedExtraParams & CustomAuthedTopParams,
 ) {
   if (params.authIsOptional) {
     return;
@@ -91,7 +91,7 @@ function checkAuth(
       const haveTags = params.tags?.some((tag) => tokenRegex.test(tag));
       if (!haveTags) {
         throw new Error(
-          "Permission denied. The provided token does not have the required tags."
+          "Permission denied. The provided token does not have the required tags.",
         );
       }
     }
@@ -110,7 +110,7 @@ function customizationWrapper<
     CustomCtx,
     CustomMadeArgs,
     ExtraArgs
-  >
+  >,
 ) {
   return x;
 }

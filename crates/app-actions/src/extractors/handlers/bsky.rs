@@ -1,5 +1,6 @@
 use std::sync::LazyLock;
 
+use app_requests::Client;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace};
@@ -7,7 +8,6 @@ use url::Url;
 
 use super::{ExtractInfoRequest, ExtractedInfo, Extractor, twitter::Twitter};
 use crate::{
-    common::request::Client,
     downloaders::handlers::{generic::Generic, yt_dlp::YtDlp},
     extractors::ExtractedUrlInfo,
 };

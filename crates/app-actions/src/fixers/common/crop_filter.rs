@@ -144,6 +144,7 @@ async fn generate_crop_filter_for_files(
     let mut res = res
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
+        .stdin(Stdio::null())
         .spawn()
         .map_err(|e| CropError::CommandError(CmdError::Run(e)))?;
 

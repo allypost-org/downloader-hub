@@ -28,7 +28,7 @@ dev-watch package *args:
         --ignore 'crates/app-migration/**/*' \
         --stop-signal 'kill' \
         -- \
-          just dev-run "$@"
+          just dev-run '{{ package }}' "$@"
 
 dev-watch-server *args: (dev-watch 'downloader-hub' args)
 
@@ -105,7 +105,7 @@ lint-fix:
         -- \
 
 fmt:
-    cargo fmt --all \
+    cargo fmt --all 2>/dev/null \
 
 [parallel]
 docker-build-all: docker-build-downloader-central docker-build-downloader-worker docker-build-downloader-bot

@@ -12,10 +12,10 @@
 
 use std::{fmt, str::FromStr, sync::LazyLock};
 
+use http::header;
 use language_tags::LanguageTag;
 use percent_encoding::{AsciiSet, CONTROLS};
 use regex::Regex;
-use reqwest::header;
 
 use super::common::charset::Charset;
 

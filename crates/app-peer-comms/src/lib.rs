@@ -15,7 +15,7 @@ use bytes::Bytes;
 use futures::StreamExt;
 use iroh::{
     Endpoint, EndpointAddr, RelayMode, RelayUrl, SecretKey, Watcher,
-    discovery::{pkarr::PkarrResolver, static_provider::StaticProvider},
+    address_lookup::{DnsAddressLookup, MemoryLookup},
     endpoint::Connection,
     protocol::Router,
 };
@@ -42,6 +42,7 @@ use iroh_gossip::{
     api::{ApiError, GossipSender, GossipTopic},
     net::Gossip,
 };
+use iroh_mdns_address_lookup::MdnsAddressLookup;
 use tokio::{fs::File, io::AsyncWriteExt, sync::RwLock};
 use tracing::{debug, error, info, trace};
 use url::Url;
@@ -474,10 +475,10 @@ impl PeeringEndpoint {
     async fn create(
         builder: PeeringEndpointBuilder,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let secret_key = builder.config.secret_key.map_or_else(
-            || SecretKey::generate(&mut rand::rng()),
-            |key| SecretKey::from_bytes(&key),
-        );
+        let secret_key = builder
+            .config
+            .secret_key
+            .map_or_else(SecretKey::generate, |key| SecretKey::from_bytes(&key));
 
         let endpoint = Self::create_endpoint(
             builder.config.clone(),
@@ -543,7 +544,7 @@ impl PeeringEndpoint {
 
         trace!(target: PeeringEndpoint::trace_span_name(), ?relay_mode, "Initialized relay mode");
 
-        let static_provider = StaticProvider::new();
+        let static_provider = MemoryLookup::new();
         if !peers.is_empty() {
             debug!(target: PeeringEndpoint::trace_span_name(), ?peers, "Adding peers to static provider");
             for peer in peers {
@@ -565,25 +566,25 @@ impl PeeringEndpoint {
         );
         trace!(target: PeeringEndpoint::trace_span_name(), ?socket_addr_v6, "Initialized IPv6 socket addr");
 
-        let endpoint = Endpoint::builder()
+        let endpoint = Endpoint::builder(iroh::endpoint::presets::N0)
             .secret_key(secret_key)
-            .discovery(PkarrResolver::n0_dns())
-            .discovery(static_provider.clone())
+            .address_lookup(DnsAddressLookup::n0_dns())
+            .address_lookup(static_provider.clone())
             .relay_mode(relay_mode.clone())
-            .bind_addr_v4(socket_addr_v4)
-            .bind_addr_v6(socket_addr_v6)
+            .bind_addr(socket_addr_v4)?
+            .bind_addr(socket_addr_v6)?
             .bind()
             .await?;
 
         endpoint
-            .discovery()
-            .add(iroh::discovery::mdns::MdnsDiscovery::builder().build(endpoint.id())?);
+            .address_lookup()?
+            .add(MdnsAddressLookup::builder().build(endpoint.id())?);
 
         debug!(target: PeeringEndpoint::trace_span_name(), on = ?endpoint.bound_sockets(), id = %endpoint.id().fmt_short(), "Initialized endpoint");
 
         if !matches!(relay_mode, RelayMode::Disabled) {
             trace!(target: PeeringEndpoint::trace_span_name(), "Waiting for endpoint to come online");
-            let timeout = Duration::from_secs(iroh::net_report::TIMEOUT * 2);
+            let timeout = Duration::from_secs(iroh::NET_REPORT_TIMEOUT * 2);
             let res = tokio::time::timeout(timeout, endpoint.online()).await;
             if res.is_err() {
                 error!(target: PeeringEndpoint::trace_span_name(), ?timeout, "Endpoint failed to come online");

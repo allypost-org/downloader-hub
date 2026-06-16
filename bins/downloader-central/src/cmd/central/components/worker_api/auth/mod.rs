@@ -9,7 +9,7 @@ use axum_extra::{
     TypedHeader,
     headers::{Authorization, authorization::Bearer},
 };
-use reqwest::StatusCode;
+use http::StatusCode;
 use serde_json::json;
 
 pub use crate::cmd::central::auth::{AuthError, ValidAuth};

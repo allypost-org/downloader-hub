@@ -5,8 +5,8 @@ use axum::{
     http::{HeaderMap, HeaderValue},
     response::{IntoResponse, Response},
 };
+use http::{StatusCode, header};
 use mime::Mime;
-use reqwest::{StatusCode, header};
 use serde::Serialize;
 
 static APPLICATION_POSTCARD: LazyLock<Mime> =

@@ -1,14 +1,12 @@
 use std::{collections::HashMap, iter::Iterator};
 
+use app_requests::Client;
 use serde::Deserialize;
 use tracing::{debug, trace};
 use url::Url;
 
 use super::{APHandler, HandleResult, node_info::NodeInfo};
-use crate::{
-    common::request::Client,
-    extractors::{ExtractedUrlInfo, handlers::twitter::Twitter},
-};
+use crate::extractors::{ExtractedUrlInfo, handlers::twitter::Twitter};
 
 #[derive(Debug)]
 pub struct MisskeyHandler;

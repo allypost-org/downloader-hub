@@ -16,18 +16,14 @@ app-logger.workspace = true
 app-migration = { version = "*", path = "../../crates/app-migration" }
 app-tasks.workspace = true
 axum = { version = "0.8.4", features = ["macros", "multipart"] }
-axum-extra = { version = "0.10.1", features = [
-    "erased-json",
-    "form",
-    "multipart",
-    "typed-header",
-] }
+axum-extra = { version = "0.12.6", features = ["erased-json", "form", "multipart", "typed-header", "with-rejection"] }
 chrono.workspace = true
 clap.workspace = true
 deadqueue = "0.2.5"
+digest = "0.11.3"
 dotenvy = "0.15.7"
 futures.workspace = true
-hmac = "0.12.1"
+hmac = "0.13.0"
 listenfd = "1.0.2"
 sea-orm = { version = "1.1.14", features = [
     "macros",
@@ -38,11 +34,11 @@ sea-orm = { version = "1.1.14", features = [
 ] }
 serde.workspace = true
 serde_json.workspace = true
-sha2 = "0.10.9"
+sha2 = "0.11.0"
 thiserror.workspace = true
 tokio.workspace = true
 tower = "0.5.2"
-tower-http = { version = "0.6.6", features = ["full"] }
+tower-http = { version = "0.7.0", features = ["full"] }
 tracing.workspace = true
 ulid = { version = "1.2.1", features = ["postgres"] }
 url.workspace = true

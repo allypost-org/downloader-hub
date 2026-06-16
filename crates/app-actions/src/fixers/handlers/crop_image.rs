@@ -1,3 +1,5 @@
+use std::process::Stdio;
+
 use app_helpers::{file_type, trash::move_to_trash};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
@@ -67,6 +69,7 @@ impl Fixer for CropImage {
                 .arg(crop_filter.to_imagemagick_dimensions());
             cmd.arg("+repage");
             cmd.arg(&output_file_path);
+            cmd.stdin(Stdio::null());
             cmd
         };
 

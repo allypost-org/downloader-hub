@@ -3,7 +3,6 @@ import { internalMutation, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import schema, {
   authedId,
-  requestDone,
   requestPending,
   requestFailed,
   requestInProgress,
@@ -43,14 +42,14 @@ export const add = mutation({
       const existing = await ctx.db
         .query(requestsId)
         .withIndex("by_idempotency_key", (q) =>
-          q.eq("idempotencyKey", args.idempotencyKey)
+          q.eq("idempotencyKey", args.idempotencyKey),
         )
         .first();
 
       if (existing) {
         console.log(
           args.idempotencyKey,
-          "already exists, returning existing request"
+          "already exists, returning existing request",
         );
 
         return {
@@ -142,7 +141,7 @@ export const getMineInProgress = query({
     ].map((s) =>
       stream(ctx.db, schema)
         .query(requestsId)
-        .withIndex("by_status_type", (q) => q.eq("status.Type", s))
+        .withIndex("by_status_type", (q) => q.eq("status.Type", s)),
     );
 
     const rows = await mergedStream(inStatuses, [
@@ -194,7 +193,7 @@ export const take = mutation({
       ok: v.literal(true),
       code: v.literal("Ok"),
       ...requestDataReturn,
-    })
+    }),
   ),
   handler: async (ctx, args) => {
     const row = await ctx.db.get(args.requestId);
@@ -221,7 +220,7 @@ export const take = mutation({
       {
         requestId: args.requestId,
         tries,
-      }
+      },
     )) as Id<"_scheduled_functions">;
 
     const status = {
@@ -270,7 +269,7 @@ export const takeCleanup = internalMutation({
     if (row.tries !== args.tries) {
       console.log(
         args.requestId,
-        `not at the expected try: ${args.tries} (expected) vs ${row.tries} (actual)`
+        `not at the expected try: ${args.tries} (expected) vs ${row.tries} (actual)`,
       );
       return null;
     }
@@ -323,7 +322,7 @@ export const updateStatusMessage = mutation({
     v.object({
       ok: v.literal(true),
       code: v.literal("Ok"),
-    })
+    }),
   ),
   handler: async (ctx, args) => {
     const row = await ctx.db.get(args.requestId);
@@ -386,7 +385,7 @@ export const addErrors = mutation({
     v.object({
       ok: v.literal(true),
       code: v.literal("Ok"),
-    })
+    }),
   ),
   handler: async (ctx, args) => {
     const row = await ctx.db.get(args.requestId);
@@ -446,7 +445,7 @@ export const moveToWaitingForRequester = mutation({
     v.object({
       ok: v.literal(true),
       code: v.literal("Ok"),
-    })
+    }),
   ),
   handler: async (ctx, args) => {
     const row = await ctx.db.get(args.requestId);
@@ -478,7 +477,7 @@ export const moveToWaitingForRequester = mutation({
       {
         requestId: args.requestId,
         tries: row.tries,
-      }
+      },
     )) as Id<"_scheduled_functions">;
 
     await Promise.all([
@@ -523,7 +522,7 @@ export const free = mutation({
     v.object({
       ok: v.literal(true),
       code: v.literal("Ok"),
-    })
+    }),
   ),
   handler: async (ctx, args) => {
     const row = await ctx.db.get(args.requestId);
@@ -616,7 +615,7 @@ export const fail = mutation({
       code: v.literal("Ok"),
       reason: v.string(),
       requesterId: v.id(authedId),
-    })
+    }),
   ),
   handler: async (ctx, args) => {
     const row = await ctx.db.get(args.requestId);
@@ -686,7 +685,7 @@ export const finish = mutation({
     v.object({
       ok: v.literal(true),
       code: v.literal("Ok"),
-    })
+    }),
   ),
   handler: async (ctx, args) => {
     const row = await ctx.db.get(args.requestId);

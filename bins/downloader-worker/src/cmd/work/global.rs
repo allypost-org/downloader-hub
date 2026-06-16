@@ -52,7 +52,8 @@ impl JwtData {
         api_key: Arc<str>,
     ) -> Result<TargetedJwtPair, Box<dyn std::error::Error + Send + Sync>> {
         debug!("Fetching token with API key");
-        let token_response = reqwest::Client::new()
+        let token_response = app_requests::Client::builder()
+            .build()?
             .post(base_url.join("/api/v1/auth/token")?)
             .header("Content-Type", "application/json")
             .body(

@@ -16,7 +16,7 @@ export const getInfoByToken = query({
     v.object({
       Type: v.literal("not-authorized"),
       error: v.string(),
-    })
+    }),
   ),
   handler: async (ctx, args) => {
     const info = await ctx.db
@@ -62,7 +62,7 @@ export const getInfoById = query({
     v.object({
       Type: v.literal("not-authorized"),
       error: v.string(),
-    })
+    }),
   ),
   handler: async (ctx, args) => {
     const info = await ctx.db.get(args.id);

@@ -3,10 +3,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use app_requests::UrlWithMeta;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::{
-    common::{fallible::TaskFallible, url::UrlWithMeta},
+    common::fallible::TaskFallible,
     downloaders::DownloaderEntry,
     extractors::{ExtractedInfo, ExtractedUrlInfo},
 };

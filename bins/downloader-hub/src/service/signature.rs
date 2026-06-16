@@ -1,6 +1,6 @@
 use app_helpers::encoding::{from_base64_padded, to_base64_padded};
 use chrono::{DateTime, Duration, Utc};
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::Sha384;
 use url::Url;

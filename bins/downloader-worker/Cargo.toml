@@ -12,20 +12,21 @@ app-config.workspace = true
 app-helpers.workspace = true
 app-logger.workspace = true
 app-peer-comms.workspace = true
+app-requests.workspace = true
 app-tasks.workspace = true
 chrono.workspace = true
 clap.workspace = true
 const_format = "0.2.35"
 dotenvy = "0.15.7"
 futures.workspace = true
+http = "1.4.2"
 moka = { version = "0.12.11", features = ["future"] }
-reqwest = { version = "0.12.24", default-features = false, features = ["json", "deflate", "gzip", "brotli", "rustls-tls", "trust-dns"] }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
-tokio-tungstenite = { version = "0.28.0", features = ["rustls", "rustls-tls-webpki-roots", "url"] }
+tokio-tungstenite = { version = "0.29.0", features = ["rustls", "rustls-tls-webpki-roots", "url"] }
 tracing.workspace = true
-tungstenite = "0.28.0"
+tungstenite = "0.29.0"
 url.workspace = true
 validator.workspace = true
 

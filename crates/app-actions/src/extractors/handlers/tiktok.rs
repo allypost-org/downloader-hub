@@ -1,13 +1,12 @@
 use std::collections::HashMap;
 
+use app_requests::UrlWithMeta;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace};
 use url::Url;
 
 use super::{ExtractInfoRequest, ExtractedInfo, Extractor};
-use crate::{
-    common::url::UrlWithMeta, config::ActionsConfig, downloaders::handlers::generic::Generic,
-};
+use crate::{config::ActionsConfig, downloaders::handlers::generic::Generic};
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Tiktok;

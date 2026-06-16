@@ -2,7 +2,7 @@ use std::{net::SocketAddr, sync::LazyLock, time::Duration};
 
 use axum::{
     Extension,
-    http::{HeaderValue, Request, header},
+    http::{HeaderValue, Request, StatusCode, header},
     middleware,
     response::Response,
 };
@@ -157,7 +157,10 @@ where
                             );
                         }),
                 )
-                .layer(TimeoutLayer::new(Duration::from_mins(1)))
+                .layer(TimeoutLayer::with_status_code(
+                    StatusCode::REQUEST_TIMEOUT,
+                    Duration::from_mins(1),
+                ))
                 .layer(PropagateRequestIdLayer::x_request_id())
                 .layer(SetResponseHeaderLayer::if_not_present(
                     header::CACHE_CONTROL,

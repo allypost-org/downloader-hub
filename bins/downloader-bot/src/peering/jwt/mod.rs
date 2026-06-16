@@ -80,7 +80,8 @@ pub async fn fetch_by_refresh_token(
     }
 
     debug!(target: PeeringEndpoint::trace_span_name(), "Fetching token with refresh token");
-    let token_response = reqwest::Client::new()
+    let token_response = app_requests::Client::builder()
+        .build()?
         .post(base_url.join("/api/v1/auth/refresh")?)
         .header("Content-Type", "application/json")
         .body(

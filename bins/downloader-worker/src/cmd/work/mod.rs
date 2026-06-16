@@ -179,7 +179,7 @@ async fn get_ticket(
 
     trace!(target: PeeringEndpoint::trace_span_name(), %url, "No ticket provided, fetching from API");
 
-    let res = reqwest::Client::builder()
+    let res = app_requests::Client::builder()
         .build()?
         .get(url)
         .header("Authorization", format!("Bearer {}", api_config.key))

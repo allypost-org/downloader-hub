@@ -1,9 +1,8 @@
+use app_requests::Client;
 use http::header;
 use serde::Deserialize;
 use tracing::{debug, trace};
 use url::Url;
-
-use crate::common::request::Client;
 
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]

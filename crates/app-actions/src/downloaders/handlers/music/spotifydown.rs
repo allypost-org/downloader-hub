@@ -5,16 +5,14 @@ use std::{
 };
 
 use app_helpers::domain::DomainParser;
+use app_requests::Client;
 use regex::Regex;
 use serde::Deserialize;
 use tracing::{debug, trace, warn};
 use url::Url;
 
 use super::Handler;
-use crate::{
-    common::request::Client,
-    downloaders::{DownloadRequest, Downloader, handlers::generic::Generic},
-};
+use crate::downloaders::{DownloadRequest, Downloader, handlers::generic::Generic};
 
 const URL_BASE: &str = "https://spotifydown.com";
 const API_BASE: &str = "https://api.spotifydown.com";
@@ -31,7 +29,7 @@ impl Handler for SpotifydownProvider {
         debug!("Downloading song");
 
         let download_url = Self::get_download_url(song_url).await.map_err(|e| {
-            if let Some(e) = e.downcast_ref::<reqwest::Error>()
+            if let Some(e) = e.downcast_ref::<app_requests::reqwest::Error>()
                 && e.is_timeout()
             {
                 warn!(

@@ -49,7 +49,7 @@ export const requests = {
     v.object(requestPending),
     v.object(requestInProgress),
     v.object(requestDone),
-    v.object(requestFailed)
+    v.object(requestFailed),
   ),
   errors: v.array(v.string()),
   metadata: v.optional(v.record(v.string(), v.string())),
@@ -76,5 +76,5 @@ export default defineSchema(
   {
     schemaValidation: true,
     strictTableNameTypes: false,
-  }
+  },
 );

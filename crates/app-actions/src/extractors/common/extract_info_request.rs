@@ -1,11 +1,9 @@
+use app_requests::{Client, RequestBuilder};
 use http::{HeaderMap, HeaderName, HeaderValue, Method, header};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use crate::{
-    common::request::{Client, RequestBuilder},
-    config::ActionsConfig,
-};
+use crate::config::ActionsConfig;
 
 #[derive(derive_more::Debug, Clone, Serialize, Deserialize)]
 pub struct ExtractInfoRequest {

@@ -23,7 +23,7 @@ pub async fn any_mine(
 ) -> impl IntoResponse {
     let Some(negotiated) = Negotiated::negotiate(&headers) else {
         return super::V1Response::<()>::err(
-            reqwest::StatusCode::NOT_ACCEPTABLE,
+            http::StatusCode::NOT_ACCEPTABLE,
             "No acceptable content type",
         )
         .into_response();

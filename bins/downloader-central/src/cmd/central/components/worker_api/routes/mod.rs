@@ -6,6 +6,7 @@ use axum::{
     routing::post,
 };
 use axum_client_ip::ClientIpSource;
+use http::StatusCode;
 use tower::ServiceBuilder;
 use tower_http::{
     catch_panic::CatchPanicLayer,
@@ -97,7 +98,10 @@ where
                         );
                     }),
             )
-            .layer(TimeoutLayer::new(Duration::from_mins(1)))
+            .layer(TimeoutLayer::with_status_code(
+                StatusCode::REQUEST_TIMEOUT,
+                Duration::from_mins(1),
+            ))
             .layer(PropagateRequestIdLayer::x_request_id())
             .layer(SetResponseHeaderLayer::appending(
                 header::DATE,
