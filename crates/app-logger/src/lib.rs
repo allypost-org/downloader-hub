@@ -21,25 +21,8 @@ static RELOAD_HANDLE: OnceLock<
 
 pub const COMPONENT_LEVELS: &[(&str, Level)] = &[
     // Binaries
-    ("downloader_bot", Level::INFO),
-    ("downloader_central", Level::INFO),
-    ("downloader_cli", Level::INFO),
-    ("downloader_hub", Level::INFO),
-    ("downloader_telegram_bot", Level::INFO),
-    ("downloader_worker", Level::INFO),
     // Libraries
-    ("app_actions", Level::INFO),
-    ("app_config", Level::INFO),
-    ("app_database", Level::INFO),
-    ("app_helpers", Level::INFO),
-    ("app_logger", Level::INFO),
-    ("app_macros", Level::INFO),
-    ("app_peer_comms", Level::INFO),
-    ("app_tasks", Level::INFO),
     // Other
-    ("app", Level::INFO),
-    ("request", Level::INFO),
-    ("peering", Level::INFO),
     // External
 ];
 

@@ -29,7 +29,6 @@ dev-build package *args:
     shift; \
     APPLICATION_NAME='{{ package }}' \
     cargo build \
-        --release \
         --package '{{ package }}' \
         "$@"
 
