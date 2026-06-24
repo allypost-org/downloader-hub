@@ -1,5 +1,5 @@
 use app_helpers::futures::run_future;
-use tracing::{debug, error, trace};
+use tracing::{debug, trace};
 
 mod cmd;
 mod config;
@@ -8,22 +8,29 @@ mod peering;
 fn main() {
     let loaded_dotenv = dotenvy::dotenv();
 
-    app_logger::init();
-
-    match loaded_dotenv {
-        Ok(loaded_dotenv) => {
-            debug!(path = ?loaded_dotenv, "Loaded dotenv file");
-        }
-        Err(e) if e.not_found() => {
-            debug!("No dotenv file found");
-        }
-        Err(e) => {
-            error!("Failed to load dotenv file: {e:?}");
-            panic!("Failed to load dotenv file: {e:?}");
-        }
+    if let Err(e) = dotenvy::dotenv()
+        && !e.not_found()
+    {
+        panic!("Failed to load dotenv file: {e:?}");
     }
 
     let config = config::Config::init_parsed().expect("Failed to initialize config");
+
+    app_logger::init_with_options(
+        app_logger::LogOptions::new()
+            .with_log_file(config.log_file.clone())
+            .with_console_format(config.log_format)
+            .with_file_format(config.log_file_format),
+    );
+
+    match loaded_dotenv {
+        Err(_) => {
+            debug!("No dotenv file found");
+        }
+        Ok(loaded_dotenv) => {
+            debug!(path = ?loaded_dotenv, "Loaded dotenv file");
+        }
+    }
 
     let _ = app_helpers::config::init(config.dependency_paths.clone());
 

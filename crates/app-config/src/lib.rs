@@ -1,4 +1,5 @@
 pub use app_macros::{Dumpable, GlobalConfig};
+pub use common::LogFormat;
 pub use traits::*;
 
 pub mod common;

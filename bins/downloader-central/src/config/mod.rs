@@ -1,5 +1,7 @@
+use std::path::PathBuf;
+
 use app_config::{
-    BUILD_DATE, BUILD_RUSTC_VERSION, Dumpable, GlobalConfig, common::APPLICATION_NAME,
+    BUILD_DATE, BUILD_RUSTC_VERSION, Dumpable, GlobalConfig, LogFormat, common::APPLICATION_NAME,
     validators::print_validation_errors,
 };
 use clap::Parser;
@@ -15,6 +17,18 @@ pub static APPLICATION_NAME_WITH_VERSION: &str =
 
 #[derive(Debug, Clone, Serialize, Deserialize, Parser, Validate, GlobalConfig, Dumpable)]
 pub struct Config {
+    /// If set, the log will be written to this file as well as stdout
+    #[clap(long, env = "DOWNLOADER_HUB_LOG_FILE")]
+    pub log_file: Option<PathBuf>,
+
+    /// Log format for stderr
+    #[clap(long, env = "DOWNLOADER_HUB_LOG_FORMAT", default_value = "pretty")]
+    pub log_format: LogFormat,
+
+    /// Log format for the log file (when `--log-file` is set)
+    #[clap(long, env = "DOWNLOADER_HUB_LOG_FILE_FORMAT", default_value = "plain")]
+    pub log_file_format: LogFormat,
+
     #[clap(subcommand)]
     #[validate(nested)]
     pub cmd: CmdConfig,
