@@ -42,7 +42,8 @@ impl<'writer> FormatFields<'writer> for JsonFileFields {
         current: &'writer mut FormattedFields<Self>,
         fields: &tracing::span::Record<'_>,
     ) -> std::fmt::Result {
-        let mut json_current = FormattedFields::<JsonFields>::new(std::mem::take(&mut current.fields));
+        let mut json_current =
+            FormattedFields::<JsonFields>::new(std::mem::take(&mut current.fields));
         JsonFields::default().add_fields(&mut json_current, fields)?;
         current.fields = json_current.fields;
         Ok(())

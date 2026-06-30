@@ -2,8 +2,8 @@ use clap::Args;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
-pub const FALLBACK_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, \
-                                       like Gecko) Chrome/88.0.4324.182 Safari/537.36";
+pub const FALLBACK_USER_AGENT: &str =
+    "Mozilla/5.0 (X11; Linux x86_64; rv:153.0) Gecko/20100101 Firefox/153.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args, Validate)]
 #[clap(next_help_heading = Some("Request options"))]
