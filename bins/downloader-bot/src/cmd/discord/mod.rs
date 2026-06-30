@@ -1,8 +1,10 @@
+use std::sync::Arc;
+
 use serenity::{Client, all::GatewayIntents};
 use tracing::{error, info, instrument};
 
 use super::CmdResult;
-use crate::cmd::discord::config::DiscordConfig;
+use crate::cmd::discord::{bot::discord_bot::DiscordBot, config::DiscordConfig};
 
 mod bot;
 pub mod broadcaster;
@@ -13,6 +15,8 @@ pub async fn run(config: DiscordConfig) -> CmdResult {
     _ = broadcaster::MessageBroadcaster::init();
 
     info!("Starting discord bot...");
+
+    let bot_config = Arc::new(config.bot.clone());
 
     let intents = GatewayIntents::non_privileged()
         | GatewayIntents::GUILD_MESSAGES
@@ -45,6 +49,8 @@ pub async fn run(config: DiscordConfig) -> CmdResult {
             }),
         }))
         .await?;
+
+    DiscordBot::init(client.http.clone(), bot_config);
 
     if let Err(e) = client.start_autosharded().await {
         error!(?e, "Failed to start discord bot");

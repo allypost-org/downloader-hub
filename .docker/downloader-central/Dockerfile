@@ -29,7 +29,6 @@ RUN cargo install cargo-chef --locked
 # Add proper target and compile flags
 ARG RUST_TARGET
 RUN rustup target add "${RUST_TARGET}"
-ENV RUSTFLAGS='-C target-feature=+crt-static'
 WORKDIR /app
 
 

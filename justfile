@@ -33,10 +33,12 @@ dev-build package *args:
         "$@"
 
 dev-watch package *args:
-    @just _watch just dev-run '{{ package }}' "$@"
+    shift; \
+    just _watch just dev-run '{{ package }}' "$@"
 
 dev-watch-build package *args:
-    @just _watch just dev-build '{{ package }}' "$@"
+    shift; \
+    just _watch just dev-build '{{ package }}' "$@"
 
 _watch *args:
     watchexec \

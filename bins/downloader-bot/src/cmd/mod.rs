@@ -2,6 +2,7 @@ use tracing::error;
 
 use crate::cmd::_config::CmdConfig;
 
+pub mod _common;
 pub mod _config;
 pub mod discord;
 pub mod telegram;

@@ -1,7 +1,6 @@
 use std::{
-    collections::HashMap,
     fmt::Write,
-    sync::{Arc, LazyLock},
+    sync::{Arc, LazyLock, Mutex},
 };
 
 use app_helpers::temp_file::TempFile;
@@ -21,20 +20,23 @@ use teloxide::{
     prelude::*,
     types::{Message as TelegramMessage, MessageEntityKind, ReplyParameters},
 };
-use tokio::sync::{Mutex, Semaphore};
+use tokio::sync::Semaphore;
 use tracing::{debug, info, trace, warn};
 use url::Url;
 
 use crate::{
-    cmd::telegram::{
-        bot::{
-            TelegramBot,
-            helpers::{
-                file_group::files_to_input_media_groups, file_id::FileId,
-                status_message::StatusMessage,
+    cmd::{
+        _common::work_request::{WorkRequestGuard, WorkRequestLockMap},
+        telegram::{
+            bot::{
+                TelegramBot,
+                helpers::{
+                    file_group::files_to_input_media_groups, file_id::FileId,
+                    status_message::StatusMessage,
+                },
             },
+            common::downloadable::Downloadable,
         },
-        common::downloadable::Downloadable,
     },
     peering::rpc::{RpcClient, RpcResponse},
 };
@@ -153,9 +155,8 @@ pub async fn process_work_request(
     work_request: Arc<WorkRequest>,
     mut status_message: StatusMessage,
 ) -> ResponseResult<()> {
-    type WorkRequestLockMap = HashMap<Arc<str>, Arc<Semaphore>>;
     static WORK_REQUESTS_PROCESSING_LOCKS: LazyLock<Arc<Mutex<WorkRequestLockMap>>> =
-        LazyLock::new(|| Arc::new(Mutex::new(HashMap::new())));
+        LazyLock::new(|| Arc::new(Mutex::new(WorkRequestLockMap::new())));
 
     let request_id = work_request.request_id.clone();
 
@@ -199,19 +200,13 @@ pub async fn process_work_request(
         return Ok(());
     }
 
-    let work_request_sem = {
-        let mut locks = WORK_REQUESTS_PROCESSING_LOCKS.lock().await;
-        locks.get(&request_id).cloned().unwrap_or_else(|| {
-            let lock = Arc::new(Semaphore::new(1));
-            locks.insert(request_id.clone(), lock.clone());
-            lock
-        })
-    };
-
-    let _work_request_permit = match work_request_sem.try_acquire() {
-        Ok(x) => x,
-        Err(e) => {
-            debug!(?e, "Work request is already being processed");
+    let _work_request_guard = match WorkRequestGuard::try_acquire(
+        WORK_REQUESTS_PROCESSING_LOCKS.clone(),
+        request_id.clone(),
+    ) {
+        Some(g) => g,
+        None => {
+            debug!("Work request is already being processed");
             return Ok(());
         }
     };
@@ -430,9 +425,12 @@ where
         let file = file.as_ref();
         let file_name = suggested_name
             .as_ref()
-            .map(std::convert::AsRef::as_ref)
-            .map(std::path::Path::as_os_str)
-            .or_else(|| file.file_name());
+            .and_then(|n| {
+                std::path::PathBuf::from(n.as_ref())
+                    .file_name()
+                    .map(std::borrow::ToOwned::to_owned)
+            })
+            .or_else(|| file.file_name().map(std::borrow::ToOwned::to_owned));
 
         let Some(file_name) = file_name else {
             continue;

@@ -4,21 +4,21 @@ use std::sync::{
 };
 
 use clap::Parser;
-use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serenity::{
     all::{CreateMessage, GuildId, Message as SerenityMessage, Ready, ResumedEvent},
     prelude::*,
 };
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 use crate::{
     cmd::discord::broadcaster::{Broadcast, BroadcastData, MessageBroadcaster},
     config::Config,
-    peering::rpc::RpcClient,
 };
 
-// mod error_formatter;
+pub mod discord_bot;
+pub mod handlers;
+pub mod helpers;
 
 pub struct Handler {
     is_loop_running: AtomicBool,
@@ -62,6 +62,7 @@ pub enum BotCommand {
     /// You can specify multiple URLs by separating them with a space.
     /// The bot will download all supported files from the URLs and fix them up using the available fixers.
     /// The resulting files will be sent as a reply to the message that triggered the command.
+    #[clap(visible_aliases = ["df"])]
     DownloadAndFix { urls: Vec<url::Url> },
 }
 impl BotCommand {
@@ -102,7 +103,7 @@ impl EventHandler for Handler {
 
         tokio::task::spawn(async move {
             loop {
-                _ = watch_work_requests().await;
+                _ = handlers::work_request::watch_work_requests().await;
 
                 let about_two_seconds = 2000 + rand::random_range(0..=2000);
                 let about_two_seconds = std::time::Duration::from_millis(about_two_seconds);
@@ -190,10 +191,17 @@ impl EventHandler for Handler {
             return;
         };
 
+        let urls = handlers::message::urls_in_message(&msg);
+
         let cmd = match BotCommand::parse(&clean_content) {
             Ok(x) => x,
             Err(e) => {
-                dbg!(&e);
+                if !urls.is_empty() {
+                    trace!("Parse failed but message has URLs, treating as free-form download");
+                    handlers::message::handle_download_request(&msg, urls).await;
+                    return;
+                }
+
                 MessageBroadcaster::send(Broadcast::from_data((
                     msg.channel_id,
                     CreateMessage::new().content(format!("```\n{}\n```", e)),
@@ -202,8 +210,6 @@ impl EventHandler for Handler {
             }
         };
 
-        // MessageBroadcaster::get().send();
-
         match cmd {
             BotCommand::Ping => {
                 _ = msg.reply(&ctx, "Pong!").await;
@@ -211,67 +217,12 @@ impl EventHandler for Handler {
             BotCommand::About => {
                 _ = msg.reply(&ctx, self.about_text.clone()).await;
             }
-            BotCommand::DownloadAndFix { urls } => {
-                let send_msg = CreateMessage::new()
-                    .add_file(serenity::all::CreateAttachment::bytes(
-                        serde_json::to_string_pretty(&urls).unwrap().as_bytes(),
-                        "hello.txt",
-                    ))
-                    .reference_message(&msg);
-
-                MessageBroadcaster::send(Broadcast::from_data((msg.channel_id, send_msg)));
+            BotCommand::DownloadAndFix { urls: cmd_urls } => {
+                let combined_urls = if cmd_urls.is_empty() { urls } else { cmd_urls };
+                handlers::message::handle_download_request(&msg, combined_urls).await;
             }
         }
     }
-}
-
-async fn watch_work_requests() -> Result<(), anyhow::Error> {
-    debug!("Starting to watch work requests");
-    let mut reqs_it = match RpcClient::work_request_watch_mine_in_progress().await {
-        Ok(x) => x,
-        Err(e) => {
-            error!(?e, "Failed to watch work requests");
-            return Err(e.into());
-        }
-    };
-
-    debug!("Connected to work requests watcher");
-
-    while let Some(ws_msg) = reqs_it.next().await {
-        let ws_msg = match ws_msg {
-            Ok(x) => x,
-            Err(e) => {
-                error!(?e, "Got error from work requests watcher socket");
-                return Err(e.into());
-            }
-        };
-
-        let msg_bytes = match ws_msg {
-            tokio_tungstenite::tungstenite::Message::Binary(x) => x,
-            tokio_tungstenite::tungstenite::Message::Text(x) => x.into(),
-            msg => {
-                trace!(?msg, "Got unknown message type");
-                continue;
-            }
-        };
-
-        let work_requests = match serde_json::from_slice::<
-            Arc<[Arc<app_peer_comms::message::v1::central::work_request::WorkRequest>]>,
-        >(&msg_bytes)
-        {
-            Ok(x) => x,
-            Err(e) => {
-                warn!(?e, "Failed to parse work request");
-                continue;
-            }
-        };
-
-        for req in work_requests.iter() {
-            dbg!(req);
-        }
-    }
-
-    Ok(())
 }
 
 async fn handle_broadcast(broadcast: Broadcast, ctx: Arc<Context>) -> Result<(), serenity::Error> {
