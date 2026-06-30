@@ -90,7 +90,7 @@ impl LogOptions {
 impl Default for LogOptions {
     fn default() -> Self {
         Self {
-            log_level: None,
+            log_level: Some(Level::INFO),
             log_file: None,
             console_format: LogFormat::Pretty,
             file_format: LogFormat::Plain,
