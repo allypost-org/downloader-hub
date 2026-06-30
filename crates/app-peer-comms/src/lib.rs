@@ -11,6 +11,7 @@ use app_config::{
     GlobalConfig,
     common::{BlobConfig, PeerCommsCommonConfig},
 };
+pub use app_requests::install_default_crypto_provider;
 use bytes::Bytes;
 use futures::StreamExt;
 use iroh::{

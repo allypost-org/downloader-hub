@@ -6,6 +6,9 @@ mod config;
 mod peering;
 
 fn main() {
+    app_requests::install_default_crypto_provider()
+        .expect("install rustls aws-lc-rs CryptoProvider");
+
     let loaded_dotenv = dotenvy::dotenv();
 
     if let Err(e) = dotenvy::dotenv()

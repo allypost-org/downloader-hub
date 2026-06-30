@@ -10,7 +10,7 @@ license.workspace = true
 derive_more.workspace = true
 http = "1.4.2"
 http-serde = "2.1.1"
-reqwest = { version = "0.13.4", default-features = false, features = ["json", "deflate", "gzip", "brotli", "cookies", "stream", "multipart", "rustls", "hickory-dns"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "deflate", "gzip", "brotli", "cookies", "stream", "multipart", "rustls"] }
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "logging", "aws_lc_rs"] }
 rustls-native-certs = "0.8"
 serde.workspace = true

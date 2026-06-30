@@ -13,6 +13,7 @@ workspace = true
 anyhow.workspace = true
 app-config.workspace = true
 app-database.workspace = true
+app-requests.workspace = true
 bao-tree = "0.16.0"
 bytes = { version = "1.11.1", features = ["serde"] }
 chrono.workspace = true
