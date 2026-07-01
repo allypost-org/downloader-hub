@@ -18,7 +18,7 @@ jobs:
       message: ${{ steps.commit_info.outputs.message }}
       branch: ${{ steps.commit_info.outputs.branch }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Collect commit info
         id: commit_info
         run: |
@@ -28,10 +28,10 @@ jobs:
           echo "COMMIT_MESSAGE_EOF" >> $GITHUB_OUTPUT
           echo "branch=${GITHUB_REF#refs/heads/}" >> $GITHUB_OUTPUT
 
-  build-downloader-worker:
+  build:
     runs-on: blacksmith-4vcpu-ubuntu-2204
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         if: github.event_name != 'pull_request'
@@ -41,87 +41,26 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/bake-action@v2
         env:
+          SHA: ${{ github.sha }}
+          REGISTRY: allypost
           AWS_ACCESS_KEY_ID: ${{ vars.CACHE_AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.CACHE_AWS_SECRET_ACCESS_KEY }}
           AWS_SESSION_TOKEN: ${{ secrets.CACHE_AWS_SESSION_TOKEN }}
         with:
-          context: .
-          file: ./.docker/downloader-worker/Dockerfile
+          files: docker-bake.hcl
+          targets: default
           push: ${{ github.event_name != 'pull_request' }}
-          pull: true
-          tags: |
-            allypost/downloader-worker:latest
-            allypost/downloader-worker:${{ github.sha }}
-          cache-from: type=s3,region=${{ vars.CACHE_AWS_REGION }},bucket=${{ vars.CACHE_AWS_BUCKET_NAME }},endpoint_url=${{ vars.CACHE_AWS_ENDPOINT_URL_S3 }},use_path_style=true
-          cache-to: type=s3,region=${{ vars.CACHE_AWS_REGION }},bucket=${{ vars.CACHE_AWS_BUCKET_NAME }},endpoint_url=${{ vars.CACHE_AWS_ENDPOINT_URL_S3 }},use_path_style=true,upload_parallelism=8,touch_refresh=1h,mode=max
-
-  build-downloader-central:
-    runs-on: blacksmith-4vcpu-ubuntu-2204
-    steps:
-      - uses: actions/checkout@v3
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        if: github.event_name != 'pull_request'
-        with:
-          username: ${{ vars.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        env:
-          AWS_ACCESS_KEY_ID: ${{ vars.CACHE_AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.CACHE_AWS_SECRET_ACCESS_KEY }}
-          AWS_SESSION_TOKEN: ${{ secrets.CACHE_AWS_SESSION_TOKEN }}
-        with:
-          context: .
-          file: ./.docker/downloader-central/Dockerfile
-          push: ${{ github.event_name != 'pull_request' }}
-          pull: true
-          tags: |
-            allypost/downloader-central:latest
-            allypost/downloader-central:${{ github.sha }}
-          cache-from: type=s3,region=${{ vars.CACHE_AWS_REGION }},bucket=${{ vars.CACHE_AWS_BUCKET_NAME }},endpoint_url=${{ vars.CACHE_AWS_ENDPOINT_URL_S3 }},use_path_style=true
-          cache-to: type=s3,region=${{ vars.CACHE_AWS_REGION }},bucket=${{ vars.CACHE_AWS_BUCKET_NAME }},endpoint_url=${{ vars.CACHE_AWS_ENDPOINT_URL_S3 }},use_path_style=true,upload_parallelism=8,touch_refresh=1h,mode=max
-
-  build-downloader-bot:
-    runs-on: blacksmith-4vcpu-ubuntu-2204
-    steps:
-      - uses: actions/checkout@v3
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        if: github.event_name != 'pull_request'
-        with:
-          username: ${{ vars.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        env:
-          AWS_ACCESS_KEY_ID: ${{ vars.CACHE_AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.CACHE_AWS_SECRET_ACCESS_KEY }}
-          AWS_SESSION_TOKEN: ${{ secrets.CACHE_AWS_SESSION_TOKEN }}
-        with:
-          context: .
-          file: ./.docker/downloader-bot/Dockerfile
-          push: ${{ github.event_name != 'pull_request' }}
-          pull: true
-          tags: |
-            allypost/downloader-bot:latest
-            allypost/downloader-bot:${{ github.sha }}
-          cache-from: type=s3,region=${{ vars.CACHE_AWS_REGION }},bucket=${{ vars.CACHE_AWS_BUCKET_NAME }},endpoint_url=${{ vars.CACHE_AWS_ENDPOINT_URL_S3 }},use_path_style=true
-          cache-to: type=s3,region=${{ vars.CACHE_AWS_REGION }},bucket=${{ vars.CACHE_AWS_BUCKET_NAME }},endpoint_url=${{ vars.CACHE_AWS_ENDPOINT_URL_S3 }},use_path_style=true,upload_parallelism=8,touch_refresh=1h,mode=max
+          set: |
+            *.cache-from=type=s3,region=${{ vars.CACHE_AWS_REGION }},bucket=${{ vars.CACHE_AWS_BUCKET_NAME }},endpoint_url=${{ vars.CACHE_AWS_ENDPOINT_URL_S3 }},use_path_style=true
+            *.cache-to=type=s3,region=${{ vars.CACHE_AWS_REGION }},bucket=${{ vars.CACHE_AWS_BUCKET_NAME }},endpoint_url=${{ vars.CACHE_AWS_ENDPOINT_URL_S3 }},use_path_style=true,upload_parallelism=8,touch_refresh=1h,mode=max
 
   notify-failed:
     runs-on: ubuntu-latest
     needs:
       - commit_info
-      - build-downloader-bot
-      - build-downloader-central
-      - build-downloader-worker
+      - build
     if: failure()
     steps:
       - name: Notify chats
@@ -145,9 +84,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - commit_info
-      - build-downloader-bot
-      - build-downloader-central
-      - build-downloader-worker
+      - build
     if: success()
     steps:
       - name: Notify Watchtower

@@ -6,7 +6,7 @@
 .dockerignore
 **/.dockerignore
 .docker/
-!.docker/*/*.sh
+!.docker/*.sh
 **/docker-compose.yml
 **/docker-compose.*.yml
 **/compose.yaml

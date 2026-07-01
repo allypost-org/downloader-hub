@@ -3,7 +3,7 @@ services:
   app:
     build:
       context: .
-      dockerfile: .docker/app/Dockerfile
+      dockerfile: .docker/Dockerfile
+      target: bot
       args:
-        - user_id=${user_id:-1000}
-        - group_id=${group_id:-1000}
+        BINARY_NAME: downloader-bot

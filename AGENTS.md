@@ -60,7 +60,7 @@ Four binaries:
 
 ## CI / deploy
 
-`.github/workflows/deploy.yaml` triggers on push to `main`. It builds three Docker images — `downloader-worker`, `downloader-central`, `downloader-bot` — and pushes them to Docker Hub; a Watchtower webhook then rolls deployments.
+`.github/workflows/deploy.yaml` triggers on push to `main`. A single `docker buildx bake` invocation builds all three images — `downloader-worker`, `downloader-central`, `downloader-bot` — from the unified `.docker/Dockerfile` (see `docker-bake.hcl`); the shared `chef`/`planner`/`deps` stages compile the workspace dependency graph once across all three. Images are pushed to Docker Hub; a Watchtower webhook then rolls deployments.
 
 ## Misc gotchas
 

@@ -75,27 +75,17 @@ lint-fix:
 fmt:
     cargo fmt --all 2>/dev/null \
 
-[parallel]
-docker-build-all: docker-build-downloader-central docker-build-downloader-worker docker-build-downloader-bot
+docker-build-all *args:
+    docker buildx bake \
+        --load \
+        "$@"
 
-docker-build tag dockerfile_name *args:
+docker-build target *args:
     shift; \
-    shift; \
-    docker build \
-        --progress plain \
-        -t '{{ tag }}' \
-        -f ./.docker/'{{ dockerfile_name }}'/Dockerfile \
-        "$@" \
-        . \
-
-docker-build-downloader-central:
-    just docker-build 'allypost/downloader-central' 'downloader-central'
-
-docker-build-downloader-worker:
-    just docker-build 'allypost/downloader-worker' 'downloader-worker'
-
-docker-build-downloader-bot:
-    just docker-build 'allypost/downloader-bot' 'downloader-bot'
+    docker buildx bake \
+        --load \
+        '{{ target }}' \
+        "$@"
 
 [parallel]
 docker-push-all: (docker-push 'allypost/downloader-central') (docker-push 'allypost/downloader-worker') (docker-push 'allypost/downloader-bot')
