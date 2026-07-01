@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use clap::{Args, ValueHint};
 use serde::{Deserialize, Serialize};
+use size::Size;
+use url::Url;
 use validator::Validate;
 
 use crate::validators::directory::{
@@ -10,7 +12,7 @@ use crate::validators::directory::{
 
 pub const OFFICIAL_API_URL: &str = "https://api.telegram.org";
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Args, Validate)]
+#[derive(derive_more::Debug, Clone, Serialize, Deserialize, Args, Validate)]
 #[clap(next_help_heading = "Telegram bot options")]
 pub struct TelegramBotConfig {
     /// The telegram bot token.
@@ -30,8 +32,8 @@ pub struct TelegramBotConfig {
     ///
     /// Can be used if a Local API server is in use <https://github.com/tdlib/telegram-bot-api>.
     #[arg(long = "telegram-api-url", default_value = OFFICIAL_API_URL, value_name = "API_URL", env = "DOWNLOADER_HUB_TELEGRAM_API_URL", value_hint = ValueHint::Url)]
-    #[validate(url)]
-    pub api_url: String,
+    #[debug("{:?}", api_url.as_str())]
+    pub api_url: Url,
 
     /// The directory to save media sent by the owner of the bot.
     ///
@@ -48,11 +50,17 @@ pub struct TelegramBotConfig {
     /// If left empty, a generic default text will be used.
     #[arg(long = "telegram-about", value_name = "ABOUT", env = "DOWNLOADER_HUB_TELEGRAM_ABOUT", value_hint = ValueHint::Other)]
     pub about: Option<String>,
+
+    /// The maximum size of a payload to send to the Telegram API.
+    ///
+    /// If not set, the default value will be used.
+    #[arg(long = "telegram-max-payload-size", value_name = "MAX_PAYLOAD_SIZE", env = "DOWNLOADER_HUB_TELEGRAM_MAX_PAYLOAD_SIZE", value_hint = ValueHint::Other, default_value = "50MB")]
+    pub max_payload_size: Size,
 }
 impl TelegramBotConfig {
     #[must_use]
     pub fn is_api_url_local(&self) -> bool {
-        self.api_url != OFFICIAL_API_URL
+        self.api_url.as_str() != OFFICIAL_API_URL
     }
 
     #[must_use]

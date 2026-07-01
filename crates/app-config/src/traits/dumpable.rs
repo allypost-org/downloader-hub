@@ -1,4 +1,4 @@
-use clap::{builder::TypedValueParser, CommandFactory, ValueEnum};
+use clap::{CommandFactory, ValueEnum, builder::TypedValueParser};
 pub use clap_complete::Shell;
 use serde::{Deserialize, Serialize};
 use validator::ValidationError;

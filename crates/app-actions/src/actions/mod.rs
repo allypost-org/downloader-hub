@@ -10,6 +10,8 @@ pub use common::{
 };
 pub use handlers::AVAILABLE_ACTIONS;
 
+use crate::config::ActionsConfig;
+
 #[async_trait::async_trait]
 #[typetag::serde(tag = "$action")]
 pub trait Action: Debug + Send + Sync {
@@ -21,6 +23,10 @@ pub trait Action: Debug + Send + Sync {
 
     async fn can_run(&self) -> bool {
         true
+    }
+
+    fn is_enabled(&self) -> bool {
+        ActionsConfig::global().is_enabled(("action", self.name()))
     }
 
     #[allow(unused_variables)]

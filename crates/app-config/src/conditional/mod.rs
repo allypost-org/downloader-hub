@@ -1,3 +1,3 @@
 pub mod cli;
-pub mod server;
+pub mod discord_bot;
 pub mod telegram_bot;

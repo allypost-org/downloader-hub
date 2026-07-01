@@ -1,3 +1,5 @@
+use std::process::Stdio;
+
 use tracing::{debug, trace};
 
 #[tracing::instrument]
@@ -7,6 +9,7 @@ pub async fn update_yt_dlp() -> anyhow::Result<()> {
         let mut cmd = tokio::process::Command::new("yt-dlp");
         cmd.arg("--ignore-config");
         cmd.arg("--update");
+        cmd.stdin(Stdio::null());
 
         cmd
     };

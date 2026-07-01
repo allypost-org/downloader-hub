@@ -10,15 +10,19 @@ license.workspace = true
 
 [dependencies]
 app-macros.workspace = true
-clap = { version = "4.5.45", features = ["derive", "env"] }
-clap_complete = "4.5.57"
-directories = "6.0.0"
+clap = { version = "4.6.1", features = ["derive", "env"] }
+clap_complete = "4.6.5"
+compile-time = "0.2.0"
+data-encoding = "2.11.0"
+derive_more = "2.1.1"
+directories-next = "2.0.0"
 serde.workspace = true
 serde_json.workspace = true
-toml = "0.9.5"
+size = { version = "0.5.0", features = ["serde"] }
+toml = "1.1.2"
 url.workspace = true
 validator = { version = "0.20.0", features = ["derive"] }
-which = "8.0.0"
+which = "8.0.3"
 
 [lints]
 workspace = true

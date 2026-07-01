@@ -1,0 +1,50 @@
+use std::sync::Arc;
+
+use serde::{Deserialize, Serialize};
+
+use crate::{Database, DatabaseError, DatabaseRequest, entity::authed::AuthedForRole};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "Type", rename_all = "kebab-case")]
+pub enum AuthedInfoResponse {
+    Authorized(AuthedInfo),
+    NotAuthorized {
+        #[serde(rename = "error")]
+        error: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthedInfo {
+    pub id: Arc<str>,
+    pub name: Arc<str>,
+    pub readonly: bool,
+    #[serde(rename = "for")]
+    pub for_role: AuthedForRole,
+    #[serde(rename = "onlyTagged", default)]
+    pub only_tagged: Arc<[String]>,
+    pub expires_at: Option<i64>,
+}
+impl Database {
+    pub async fn authed_get_info_by_token(
+        &self,
+        token: Arc<str>,
+    ) -> Result<AuthedInfoResponse, DatabaseError> {
+        DatabaseRequest::named("authed:getInfoByToken")
+            .with_arg("token", token.as_ref())
+            .query(self)
+            .await
+    }
+}
+
+impl Database {
+    pub async fn authed_get_info_by_id(
+        &self,
+        id: Arc<str>,
+    ) -> Result<AuthedInfoResponse, DatabaseError> {
+        DatabaseRequest::named("authed:getInfoById")
+            .with_arg("id", id.as_ref())
+            .query(self)
+            .await
+    }
+}

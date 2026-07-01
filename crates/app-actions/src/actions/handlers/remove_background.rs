@@ -5,9 +5,12 @@ use app_helpers::{
     file_type::{infer_file_type, mime},
     futures::tryhard,
 };
+use app_requests::{
+    Client,
+    reqwest::{Body, multipart},
+};
 use futures::StreamExt;
 use http::header;
-use reqwest::{multipart, Body};
 use serde::{Deserialize, Serialize};
 use tokio::{fs::File, io::AsyncWriteExt};
 use tokio_util::codec::{BytesCodec, FramedRead};
@@ -15,8 +18,7 @@ use tracing::{trace, warn};
 
 use crate::{
     actions::{Action, ActionError, ActionRequest, ActionResult},
-    common::request::Client,
-    fixers::{handlers::crop_image::CropImage, FixRequest, Fixer},
+    fixers::{FixRequest, Fixer, handlers::crop_image::CropImage},
 };
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -74,7 +76,7 @@ impl Action for RemoveBackground {
                     }))
                     .send()
                     .await
-                    .and_then(reqwest::Response::error_for_status)
+                    .and_then(app_requests::reqwest::Response::error_for_status)
                     .map_err(|e| {
                         trace!("Failed to run remove background task: {e:?}");
                         ActionError::FailedAction(
@@ -113,7 +115,7 @@ impl Action for RemoveBackground {
             .get(bg_removed_url)
             .send()
             .await
-            .and_then(reqwest::Response::error_for_status)
+            .and_then(app_requests::reqwest::Response::error_for_status)
             .map_err(|e| {
                 ActionError::FailedAction(format!("Failed to download file: {e:?}").into())
             })?
@@ -152,7 +154,10 @@ struct TempFileUpload {
 impl TempFileUpload {
     const SERVICE_URL: &'static str = "https://0x0.st";
 
-    pub async fn upload(client: &reqwest::Client, file_path: &Path) -> Result<Self, ActionError> {
+    pub async fn upload(
+        client: &app_requests::reqwest::Client,
+        file_path: &Path,
+    ) -> Result<Self, ActionError> {
         let form = {
             let file = {
                 let file = File::open(&file_path).await.map_err(|e| {
@@ -207,7 +212,7 @@ impl TempFileUpload {
             .multipart(form)
             .send()
             .await
-            .and_then(reqwest::Response::error_for_status)
+            .and_then(app_requests::reqwest::Response::error_for_status)
             .map_err(|e| {
                 ActionError::FailedAction(format!("Failed to run file upload task: {e:?}").into())
             })?;
@@ -273,7 +278,7 @@ impl TempFileUpload {
             )
             .send()
             .await
-            .and_then(reqwest::Response::error_for_status)
+            .and_then(app_requests::reqwest::Response::error_for_status)
             .map_err(|e| {
                 ActionError::FailedAction(format!("Failed to delete remote file: {e:?}").into())
             });

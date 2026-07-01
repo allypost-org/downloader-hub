@@ -1,25 +1,18 @@
-use http::{HeaderMap, Method};
+use app_requests::{Client, RequestBuilder};
+use http::{HeaderMap, HeaderName, HeaderValue, Method, header};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use crate::common::request::{Client, RequestBuilder};
+use crate::config::ActionsConfig;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(derive_more::Debug, Clone, Serialize, Deserialize)]
 pub struct ExtractInfoRequest {
+    #[debug("{:?}", url.as_str())]
     pub url: Url,
     #[serde(with = "http_serde::method", default = "default_get")]
     pub method: Method,
     #[serde(with = "http_serde::header_map", default)]
     pub headers: HeaderMap,
-}
-impl std::fmt::Debug for ExtractInfoRequest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ExtractInfoRequest")
-            .field("url", &self.url.as_str())
-            .field("method", &self.method)
-            .field("headers", &self.headers)
-            .finish()
-    }
 }
 
 impl ExtractInfoRequest {
@@ -35,6 +28,43 @@ impl ExtractInfoRequest {
         }
     }
 
+    #[must_use]
+    pub fn with_method<T>(mut self, method: T) -> Self
+    where
+        T: Into<Method>,
+    {
+        self.method = method.into();
+        self
+    }
+
+    #[must_use]
+    pub fn with_header<K, V>(mut self, key: K, value: V) -> Self
+    where
+        K: Into<HeaderName>,
+        V: Into<HeaderValue>,
+    {
+        self.headers.insert(key.into(), value.into());
+        self
+    }
+
+    #[must_use]
+    pub fn with_headers<T, K, V>(mut self, headers: T) -> Self
+    where
+        T: IntoIterator<Item = (K, V)>,
+        K: Into<HeaderName>,
+        V: Into<HeaderValue>,
+    {
+        self.headers = headers
+            .into_iter()
+            .fold(HeaderMap::new(), |mut map, (k, v)| {
+                map.insert(k.into(), v.into());
+                map
+            });
+        self
+    }
+}
+
+impl ExtractInfoRequest {
     pub fn as_request_builder(&self) -> Result<RequestBuilder, String> {
         let mut builder = Client::base()?.request(
             self.method
@@ -46,6 +76,21 @@ impl ExtractInfoRequest {
 
         for (k, v) in &self.headers {
             builder = builder.header(k, v);
+        }
+
+        if !self.headers.contains_key(header::USER_AGENT) {
+            builder = builder.header(
+                header::USER_AGENT,
+                ActionsConfig::request().user_agent.as_str(),
+            );
+        }
+
+        if !self.headers.contains_key(header::ACCEPT) {
+            builder = builder.header(header::ACCEPT, "*/*");
+        }
+
+        if !self.headers.contains_key(header::ACCEPT_LANGUAGE) {
+            builder = builder.header(header::ACCEPT_LANGUAGE, "en-US,en;q=0.9");
         }
 
         Ok(builder)

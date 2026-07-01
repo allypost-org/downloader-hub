@@ -1,4 +1,10 @@
-use std::{collections::HashMap, io, num, path::Path, process, time};
+use std::{
+    collections::HashMap,
+    io, num,
+    path::Path,
+    process::{self, Stdio},
+    time,
+};
 
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
@@ -48,6 +54,7 @@ where
         }
 
         cmd.arg(path);
+        cmd.stdin(Stdio::null());
     }
 
     let out = cmd.output().await.map_err(FfProbeError::Io)?;
@@ -78,6 +85,7 @@ pub fn ffprobe_config(
         }
 
         cmd.arg(path);
+        cmd.stdin(Stdio::null());
     }
 
     let out = cmd.output().map_err(FfProbeError::Io)?;

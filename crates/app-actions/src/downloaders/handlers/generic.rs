@@ -1,7 +1,8 @@
 use std::{ffi::OsString, path::PathBuf, string::ToString};
 
-use app_config::timeframe::Timeframe;
+use app_config::{common::Size, timeframe::Timeframe};
 use app_helpers::id::time_id;
+use app_requests::Client;
 use http::header;
 use mime2ext::mime2ext;
 use serde::{Deserialize, Serialize};
@@ -10,11 +11,8 @@ use tracing::{debug, info, trace};
 use unicode_segmentation::UnicodeSegmentation;
 use url::Url;
 
-use super::{DownloadRequest, DownloadResult, Downloader, DownloaderReturn};
-use crate::{
-    common::request::Client,
-    downloaders::{helpers::headers::content_disposition, DownloaderOptions},
-};
+use super::{DownloadRequest, DownloadResult, Downloader, DownloaderError, DownloaderReturn};
+use crate::downloaders::{DownloaderOptions, helpers::headers::content_disposition};
 
 pub const MAX_FILENAME_LENGTH: usize = 120;
 
@@ -33,13 +31,21 @@ impl Downloader for Generic {
     }
 
     async fn download(&self, request: &DownloadRequest) -> DownloaderReturn {
-        self.download_one(request).await
+        match self.download_one(request).await {
+            Ok(x) => Ok(x),
+            Err(e) if request.fallibility().can_fail() => Err(DownloaderError::FallibleFailed(e)),
+            Err(e) => Err(DownloaderError::Error(e)),
+        }
     }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct GenericDownloaderOptions {
+    #[serde(default)]
+    max_filesize: Option<Size>,
+
+    #[serde(default)]
     timeout: Option<Timeframe>,
 }
 impl GenericDownloaderOptions {
@@ -79,13 +85,17 @@ impl Generic {
         request_info: &DownloadRequest,
     ) -> Result<DownloadResult, String> {
         let url = &request_info.url;
-        let options = request_info.downloader_options::<GenericDownloaderOptions>();
+        let options = request_info
+            .downloader_options::<GenericDownloaderOptions>()
+            .unwrap_or_default();
+
+        debug!(?options, "Running with downloader options");
 
         info!(?url, dir = ?request_info.download_dir(), "Downloading with generic downloader");
 
-        let mut res = Client::base_with_url(url)?.headers(url.headers().clone());
+        let mut res = Client::request_from_url(url)?.headers(url.headers().clone());
 
-        if let Some(timeout) = options.and_then(|x| x.timeout) {
+        if let Some(timeout) = options.timeout {
             res = res.timeout(timeout.into());
         }
 
@@ -122,6 +132,11 @@ impl Generic {
                 x.get_filename_ext()
                     .and_then(content_disposition::ExtendedValue::try_decode)
                     .or_else(|| x.get_filename().map(ToString::to_string))
+                    .map(|x| {
+                        let trunc_idx =
+                            x.floor_char_boundary(MAX_FILENAME_LENGTH - 1 - taken_filename_len);
+                        x[..trunc_idx].to_string()
+                    })
             })
             .or_else(|| {
                 let url = url.url();
@@ -141,6 +156,11 @@ impl Generic {
             .await
             .map_err(|e| format!("Failed to create file: {:?}", e))?;
 
+        #[allow(clippy::cast_possible_truncation)]
+        let max_filesize = options
+            .max_filesize
+            .map_or(u64::MAX, |x| x.bytes().cast_unsigned()) as usize;
+        let mut total_bytes_read = 0;
         while let Some(chunk) = res
             .chunk()
             .await
@@ -150,6 +170,15 @@ impl Generic {
                 .write_all(&chunk)
                 .await
                 .map_err(|e| format!("Failed to write chunk: {:?}", e))?;
+
+            total_bytes_read += chunk.len();
+
+            if total_bytes_read > max_filesize {
+                return Err(format!(
+                    "Max filesize ({} bytes) exceeded ({} bytes)",
+                    max_filesize, total_bytes_read
+                ));
+            }
         }
 
         Ok(DownloadResult {
@@ -171,10 +200,6 @@ fn url_to_filename(url: &Url, taken_filename_len: usize) -> Option<String> {
             .take(MAX_FILENAME_LENGTH - 1 - taken_filename_len)
             .collect::<String>();
 
-        if trunc.is_empty() {
-            None
-        } else {
-            Some(trunc)
-        }
+        if trunc.is_empty() { None } else { Some(trunc) }
     })
 }

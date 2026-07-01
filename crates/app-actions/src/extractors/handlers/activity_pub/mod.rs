@@ -1,6 +1,6 @@
 use std::sync::LazyLock;
 
-use node_info::{get_node_info, NodeInfo};
+use node_info::{NodeInfo, get_node_info};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace, warn};
 

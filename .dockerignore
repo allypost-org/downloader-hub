@@ -1,26 +1,27 @@
 # git
-.gitignore
-.git
+**/.gitignore
+**/.git
 
 # docker
 .dockerignore
+**/.dockerignore
 .docker/
-!.docker/app/*.sh
-docker-compose.yml
-docker-compose.*.yml
-compose.yaml
-compose.*.yaml
+!.docker/*.sh
+**/docker-compose.yml
+**/docker-compose.*.yml
+**/compose.yaml
+**/compose.*.yaml
 
 # misc
-.DS_Store
+**/.DS_Store
 LICENSE
-README.md
+**/README.md
 config/
 test-media/
 .github/
 .drone.yml
-.env
-.env.*
+**/.env
+**/.env.*
 mprocs.yaml
 .bruno
 justfile
@@ -28,7 +29,9 @@ justfile
 
 # artefacts
 target/
+/dev/
 .out/
+**/node_modules/
 
 # editors
 .vscode/

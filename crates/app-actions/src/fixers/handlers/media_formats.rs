@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    process::Stdio,
+};
 
 use anyhow::anyhow;
 use app_helpers::{
@@ -17,8 +20,8 @@ use tracing::{debug, error, trace};
 use crate::{
     config::ActionsConfig,
     fixers::{
-        common::{FixRequest, FixResult, FixerError},
         Fixer, FixerReturn, IntoFixerReturn,
+        common::{FixRequest, FixResult, FixerError},
     },
 };
 
@@ -228,6 +231,8 @@ async fn transcode_media_into(
     }
 
     cmd = cmd.args(&to_format.additional_args);
+
+    cmd = cmd.stdin(Stdio::null());
 
     let cmd = cmd.arg(&cache_to_path);
     debug!("Running `ffmpeg' command: {cmd:?}");

@@ -1,14 +1,12 @@
 use std::{collections::HashMap, iter::Iterator};
 
+use app_requests::Client;
 use serde::Deserialize;
 use tracing::{debug, trace};
 use url::Url;
 
-use super::{node_info::NodeInfo, APHandler, HandleResult};
-use crate::{
-    common::request::Client,
-    extractors::{handlers::twitter::Twitter, ExtractedUrlInfo},
-};
+use super::{APHandler, HandleResult, node_info::NodeInfo};
+use crate::extractors::{ExtractedUrlInfo, handlers::twitter::Twitter};
 
 #[derive(Debug)]
 pub struct MisskeyHandler;
@@ -24,16 +22,16 @@ impl APHandler for MisskeyHandler {
 
     #[tracing::instrument]
     async fn handle(&self, info: &NodeInfo, url: &str) -> Result<HandleResult, String> {
-        let parsed_url = Url::parse(url).map_err(|e| e.to_string())?;
+        let url = Url::parse(url).map_err(|e| e.to_string())?;
 
-        let post_id = parsed_url
+        let post_id = url
             .path_segments()
             .and_then(Iterator::last)
             .unwrap_or_default();
 
         trace!(?post_id, "Got post ID");
 
-        let post_info = PostInfo::from_id(&parsed_url, post_id).await?;
+        let post_info = PostInfo::from_id(&url, post_id).await?;
 
         debug!(?post_info, "Got post info");
 
@@ -43,7 +41,7 @@ impl APHandler for MisskeyHandler {
             .map(|x| x.to_string().into())
             .collect::<Vec<ExtractedUrlInfo>>();
 
-        urls.push(Twitter.screenshot_tweet_url_info(url));
+        urls.push(Twitter.screenshot_tweet_url_info(&url));
 
         Ok(HandleResult::Handled(urls))
     }

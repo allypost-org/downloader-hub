@@ -14,3 +14,6 @@ pub mod temp_dir;
 pub mod temp_file;
 pub mod trash;
 pub use app_config::timeframe;
+pub mod file_size;
+pub mod tree_yielder;
+pub mod unique_vec;

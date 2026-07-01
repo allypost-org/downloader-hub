@@ -1,0 +1,56 @@
+procs:
+  db:
+    cwd: ./crates/app-database
+    cmd: ["bun", "run", "dev"]
+
+  central:
+    cmd:
+      [
+        "just",
+        "dev-watch",
+        "downloader-central",
+        "run",
+        "--peer-comms-secret-key",
+        "fac9d08bc9df1b0ca7e829a14868782605830ca417114e1d32f4915cc3598c7c",
+        "--peer-comms-blob-store-path",
+        "./dev/peer-comms-blobs-store-central/",
+      ]
+
+  worker:
+    cmd:
+      [
+        "just",
+        "dev-watch",
+        "downloader-worker",
+        "run",
+        "--peer-comms-secret-key",
+        "ebf854aaa7ad01fdbbb6ebf9ec13b42249762cd3d40284d98e6d17d4e6d301c1",
+        "--peer-comms-blob-store-path",
+        "./dev/peer-comms-blobs-store-worker/",
+      ]
+
+  bot-telegram:
+    cmd:
+      [
+        "just",
+        "dev-watch",
+        "downloader-bot",
+        "--peer-comms-blob-store-path",
+        "./dev/peer-comms-blobs-store-telegram-bot/",
+        "--peer-comms-bot-api-key",
+        "saturn-dev-bot-telegram",
+        "telegram",
+      ]
+
+  bot-discord:
+    cmd:
+      [
+        "just",
+        "dev-watch",
+        "downloader-bot",
+        "--peer-comms-blob-store-path",
+        "./dev/peer-comms-blobs-store-discord-bot/",
+        "--peer-comms-bot-api-key",
+        "saturn-dev-bot-discord",
+        "discord",
+      ]

@@ -6,8 +6,8 @@ use tokio::fs;
 use tracing::{debug, trace};
 
 use crate::fixers::{
-    common::{FixRequest, FixResult, FixerError},
     Fixer, FixerReturn, IntoFixerReturn,
+    common::{FixRequest, FixResult, FixerError},
 };
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]

@@ -10,7 +10,11 @@ where
     let parsed =
         Url::parse(url.into().as_ref()).map_err(|_| ValidationError::new("Invalid URL"))?;
 
-    if parsed.cannot_be_a_base() {
+    validate_url_is_absolute_url(&parsed)
+}
+
+pub fn validate_url_is_absolute_url(url: &Url) -> Result<(), ValidationError> {
+    if url.cannot_be_a_base() {
         return Err(ValidationError::new("URL must be absolute"));
     }
 
@@ -29,7 +33,7 @@ pub fn value_parser_parse_absolute_url() -> impl clap::builder::TypedValueParser
             return Err("URL must be absolute".to_string());
         }
 
-        Ok(parsed.to_string())
+        Ok(parsed)
     }
 }
 

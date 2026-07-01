@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    process::Stdio,
+};
 
 use app_helpers::temp_dir::TempDir;
 use serde::{Deserialize, Serialize};
@@ -95,7 +98,8 @@ async fn split_into_scenes(config: SplitVideoConfig) -> Result<Vec<PathBuf>, Act
             &config
                 .file_template
                 .unwrap_or_else(|| "$VIDEO_NAME.$SCENE_NUMBER".to_string()),
-        ]);
+        ])
+        .stdin(Stdio::null());
 
     let output = cmd
         .output()

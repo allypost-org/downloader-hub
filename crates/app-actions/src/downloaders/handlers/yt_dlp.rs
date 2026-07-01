@@ -2,18 +2,20 @@ use std::{
     io::Write,
     ops::Sub,
     path::PathBuf,
-    process,
+    process::{self, Stdio},
     time::{Duration, SystemTime},
 };
 
-use app_helpers::{id::time_id, temp_dir::TempDir, temp_file::TempFile};
+use app_helpers::{file_size, id::time_id, temp_dir::TempDir, temp_file::TempFile};
 use http::header;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tracing::{debug, trace};
 
-use super::{generic, DownloadRequest, DownloadResult, Downloader, DownloaderReturn};
-use crate::{common::request::USER_AGENT, config::ActionsConfig};
+use super::{
+    DownloadRequest, DownloadResult, Downloader, DownloaderError, DownloaderReturn, generic,
+};
+use crate::{config::ActionsConfig, downloaders::DownloaderOptions};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct YtDlp;
@@ -30,7 +32,11 @@ impl Downloader for YtDlp {
     }
 
     async fn download(&self, req: &DownloadRequest) -> DownloaderReturn {
-        self.download_one(req).await
+        match self.download_one(req).await {
+            Ok(x) => Ok(x),
+            Err(e) if req.fallibility().can_fail() => Err(DownloaderError::FallibleFailed(e)),
+            Err(e) => Err(DownloaderError::Error(e)),
+        }
     }
 }
 
@@ -42,11 +48,16 @@ impl YtDlp {
         let temp_dir = TempDir::in_tmp_with_prefix("downloader-hub_yt-dlp-")
             .map_err(|e| format!("Failed to create temporary directory for yt-dlp: {e:?}"))?;
         let output_template = get_output_template(temp_dir.path());
+        let opts = request
+            .downloader_options::<YtDlpOptions>()
+            .unwrap_or_default();
+
+        debug!(?opts, "Running with downloader options");
 
         let parsed_url = request.url.url();
         let host_str = parsed_url.host_str().unwrap_or_default();
         let in_a_year = SystemTime::now()
-            .checked_add(Duration::from_secs(60 * 60 * 24 * 365))
+            .checked_add(Duration::from_hours(8760))
             .unwrap_or_else(SystemTime::now)
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_else(|_| Duration::from_secs(0))
@@ -85,12 +96,19 @@ impl YtDlp {
                 .arg("--no-config")
                 .arg("--no-playlist");
 
+            if let Some(max_filesize) = opts.max_filesize {
+                cmd = cmd
+                    .arg("--max-filesize")
+                    .arg(format!("{}K", max_filesize / 1000));
+            }
+
             if !cookie_values.is_empty() {
                 debug!("Adding cookie headers: {:?}", &cookie_values);
 
-                let mut cookie_file = TempFile::with_prefix("cookie-headers-").map_err(|e| {
-                    format!("Failed to create temporary file for yt-dlp cookie headers: {e:?}")
-                })?;
+                let mut cookie_file =
+                    TempFile::new_with_prefix("cookie-headers-").map_err(|e| {
+                        format!("Failed to create temporary file for yt-dlp cookie headers: {e:?}")
+                    })?;
 
                 cookie_file
                     .file_mut()
@@ -130,12 +148,12 @@ impl YtDlp {
                         .to_str()
                         .ok_or_else(|| "Failed to convert path to string".to_string())?,
                 ])
-                .args(["--user-agent", USER_AGENT])
+                .args(["--user-agent", &ActionsConfig::request().user_agent])
                 .args(["--no-simulate", "--print", "after_move:filepath"])
                 // .arg("--verbose")
                 .arg(request.url.url().as_str());
 
-            cmd
+            cmd.stdin(Stdio::null())
         };
         debug!("Running cmd: {:?}", &cmd);
         let cmd_output = cmd.output().await;
@@ -162,10 +180,13 @@ impl YtDlp {
                 stderr,
                 status: _,
             }) if is_image_error(stderr.clone()) => {
-                return generic::Generic.download(request).await
+                return generic::Generic
+                    .download(request)
+                    .await
+                    .map_err(DownloaderError::original_message);
             }
             _ => {
-                return Err(format!("yt-dlp failed downloading meme: {cmd_output:?}"));
+                return Err(format!("yt-dlp failed downloading item: {cmd_output:?}"));
             }
         };
 
@@ -185,6 +206,41 @@ impl YtDlp {
             request: request.clone(),
             path: final_file_path,
         })
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[derive(Default)]
+pub struct YtDlpOptions {
+    #[serde(with = "file_size::serde_maybe", default)]
+    max_filesize: Option<u64>,
+}
+
+impl YtDlpOptions {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[must_use]
+    pub const fn with_max_filesize(mut self, max_filesize: Option<u64>) -> Self {
+        self.max_filesize = max_filesize;
+        self
+    }
+}
+
+impl From<YtDlpOptions> for DownloaderOptions {
+    fn from(val: YtDlpOptions) -> Self {
+        serde_json::to_value(val)
+            .map(|x| {
+                x.as_object()
+                    .cloned()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 }
 

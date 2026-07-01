@@ -1,10 +1,13 @@
 use std::{collections::HashMap, sync::Arc};
 
+use app_requests::UrlWithMeta;
+use http::header::IntoHeaderName;
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 use super::extract_info_request::ExtractInfoRequest;
 use crate::{
-    common::url::UrlWithMeta,
+    common::fallible::TaskFallible,
     downloaders::{Downloader, DownloaderOptions},
 };
 
@@ -42,6 +45,25 @@ impl ExtractedInfo {
         I: Into<ExtractedUrlInfo>,
     {
         Self::from_urls(req, [url])
+    }
+
+    #[must_use]
+    pub fn with_url<I>(mut self, url: I) -> Self
+    where
+        I: Into<ExtractedUrlInfo>,
+    {
+        self.urls.push(url.into());
+        self
+    }
+
+    #[must_use]
+    pub fn with_urls<U, I>(mut self, urls: U) -> Self
+    where
+        U: IntoIterator<Item = I>,
+        I: Into<ExtractedUrlInfo>,
+    {
+        self.urls.extend(urls.into_iter().map(Into::into));
+        self
     }
 
     #[must_use]
@@ -104,6 +126,7 @@ pub struct ExtractedUrlInfo {
     pub url: UrlWithMeta,
     pub preferred_downloader: Option<PreferredDownloader>,
     pub downloader_options: DownloaderOptions,
+    pub fallible: TaskFallible,
 }
 impl ExtractedUrlInfo {
     #[must_use]
@@ -115,6 +138,7 @@ impl ExtractedUrlInfo {
             url: url.into(),
             preferred_downloader: None,
             downloader_options: HashMap::new(),
+            fallible: TaskFallible::default(),
         }
     }
 
@@ -155,6 +179,30 @@ impl ExtractedUrlInfo {
     pub fn downloader_option(&self, key: &str) -> Option<&serde_json::Value> {
         self.downloader_options.get(key)
     }
+
+    #[must_use]
+    pub const fn with_fallible(mut self, fallible: TaskFallible) -> Self {
+        self.fallible = fallible;
+        self
+    }
+
+    #[must_use]
+    pub const fn as_fallible(mut self) -> Self {
+        self.fallible = TaskFallible::CanFail;
+        self
+    }
+}
+
+impl ExtractedUrlInfo {
+    #[must_use]
+    pub fn with_header<K, V>(mut self, key: K, value: V) -> Self
+    where
+        K: IntoHeaderName,
+        V: ToString,
+    {
+        self.url = self.url.with_header(key, value);
+        self
+    }
 }
 
 impl From<UrlWithMeta> for ExtractedUrlInfo {
@@ -177,6 +225,12 @@ impl From<&String> for ExtractedUrlInfo {
 
 impl From<&str> for ExtractedUrlInfo {
     fn from(url: &str) -> Self {
+        Self::new(url)
+    }
+}
+
+impl From<Url> for ExtractedUrlInfo {
+    fn from(url: Url) -> Self {
         Self::new(url)
     }
 }

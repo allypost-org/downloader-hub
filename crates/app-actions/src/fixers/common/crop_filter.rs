@@ -8,7 +8,7 @@ use tokio::{
 };
 use tracing::{debug, trace};
 
-use super::{command::CmdError, FixerError, FixerReturn};
+use super::{FixerError, FixerReturn, command::CmdError};
 use crate::{config::ActionsConfig, fixers::IntoFixerReturn};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -144,6 +144,7 @@ async fn generate_crop_filter_for_files(
     let mut res = res
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
+        .stdin(Stdio::null())
         .spawn()
         .map_err(|e| CropError::CommandError(CmdError::Run(e)))?;
 
@@ -187,7 +188,7 @@ async fn generate_crop_filter_for_files(
                 continue;
             }
 
-            trace!(?line, ?line_filter, "Parsed line to filter");
+            // trace!(?line, ?line_filter, "Parsed line to filter");
             filter.union(&line_filter);
         }
 

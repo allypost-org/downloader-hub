@@ -2,9 +2,11 @@ use std::convert::Into;
 
 use app_helpers::file_time::transferable_file_times;
 pub use common::{FixRequest, FixResult, FixerError, FixerReturn};
+pub use handlers::AVAILABLE_FIXERS;
 use handlers::FixerInstance;
-pub use handlers::{AVAILABLE_FIXERS, ENABLED_FIXERS};
-use tracing::{debug, trace, warn};
+use tracing::{Instrument, debug, trace, warn};
+
+use crate::config::ActionsConfig;
 
 mod common;
 pub mod handlers;
@@ -22,8 +24,8 @@ pub trait Fixer: std::fmt::Debug + Send + Sync {
         true
     }
 
-    fn enabled_by_default(&self) -> bool {
-        true
+    fn is_enabled(&self) -> bool {
+        ActionsConfig::global().is_enabled(("fixer", self.name()))
     }
 
     #[allow(unused_variables)]
@@ -48,7 +50,7 @@ where
 }
 
 pub async fn fix_file(request: FixRequest) -> FixerReturn {
-    fix_file_with(ENABLED_FIXERS.clone(), request).await
+    fix_file_with(AVAILABLE_FIXERS.clone(), request).await
 }
 
 #[tracing::instrument(skip(request))]
@@ -68,7 +70,11 @@ pub async fn fix_file_with(fixers: Vec<FixerInstance>, request: FixRequest) -> F
 
         trace!("Running fixer {fixer:?} on {req:?}");
 
-        let result = match fixer.run(&req).await {
+        let result = match fixer
+            .run(&req)
+            .instrument(tracing::trace_span!("fixer", fixer = %fixer.name()))
+            .await
+        {
             Ok(x) => x,
             Err(e) => {
                 warn!("Failed to run fixer {fixer:?} on {req:?}: {e:?}");
@@ -81,12 +87,11 @@ pub async fn fix_file_with(fixers: Vec<FixerInstance>, request: FixRequest) -> F
         req = req.clone_with_path(result.file_path);
     }
 
-    if let Ok(transfer_file_times) = transfer_file_times {
-        if req.file_path.as_os_str() != request.file_path.as_os_str() {
-            if let Err(e) = transfer_file_times(&req.file_path) {
-                warn!("Failed to transfer file times of {request:?} to {req:?}: {e:?}");
-            }
-        }
+    if let Ok(transfer_file_times) = transfer_file_times
+        && req.file_path.as_os_str() != request.file_path.as_os_str()
+        && let Err(e) = transfer_file_times(&req.file_path)
+    {
+        warn!("Failed to transfer file times of {request:?} to {req:?}: {e:?}");
     }
 
     debug!(?req, "Fixed file");

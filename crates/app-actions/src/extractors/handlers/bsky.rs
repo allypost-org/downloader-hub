@@ -1,13 +1,13 @@
 use std::sync::LazyLock;
 
+use app_requests::Client;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace};
 use url::Url;
 
-use super::{twitter::Twitter, ExtractInfoRequest, ExtractedInfo, Extractor};
+use super::{ExtractInfoRequest, ExtractedInfo, Extractor, twitter::Twitter};
 use crate::{
-    common::request::Client,
     downloaders::handlers::{generic::Generic, yt_dlp::YtDlp},
     extractors::ExtractedUrlInfo,
 };
@@ -34,7 +34,7 @@ impl Extractor for Bsky {
             }
         };
 
-        urls.push(Twitter.screenshot_tweet_url_info(request.url.as_str()));
+        urls.push(Twitter.screenshot_tweet_url_info(&request.url));
 
         Ok(ExtractedInfo::from_urls(request, urls))
     }
@@ -190,7 +190,9 @@ impl PostMedia {
                 })
                 .collect(),
             Self::Video { playlist, .. } => {
-                vec![ExtractedUrlInfo::new(playlist.as_str()).with_preferred_downloader(Some(YtDlp))]
+                vec![
+                    ExtractedUrlInfo::new(playlist.as_str()).with_preferred_downloader(Some(YtDlp)),
+                ]
             }
             Self::External { .. } => vec![],
         }

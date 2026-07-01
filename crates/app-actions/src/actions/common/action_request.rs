@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::PathBuf};
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub type ActionOptions = HashMap<String, serde_json::Value>;
 

@@ -1,6 +1,6 @@
 use std::ops::Deref;
 
-use app_config::{common, GlobalConfig};
+use app_config::{GlobalConfig, common};
 
 #[derive(Debug, Clone, GlobalConfig)]
 pub(crate) struct TaskConfig {

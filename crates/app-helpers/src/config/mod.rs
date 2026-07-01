@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use app_config::{
-    common::{ProgramPathConfig, ProjectConfig},
     GlobalConfig,
+    common::{ProgramPathConfig, ProjectConfig},
 };
 use validator::Validate;
 

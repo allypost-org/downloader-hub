@@ -65,6 +65,8 @@ pub enum CmdError {
     FailedStatus(String, ExitStatus),
     #[error(transparent)]
     Decode(#[from] CmdOutputErr),
+    #[error("Command timed out")]
+    Timeout,
 }
 
 #[derive(Debug, Error)]

@@ -1,96 +1,105 @@
-set dotenv-load := true
-set positional-arguments := true
-
-rustflags := "-C target-feature=+crt-static"
-rust_target := "x86_64-unknown-linux-gnu"
+set dotenv-load
+set positional-arguments
 
 default:
     @just --list
 
-build:
-    RUSTFLAGS='{{rustflags}}' \
-    cargo build --release --target '{{rust_target}}'
+run package *args:
+    APPLICATION_NAME='{{ package }}' \
+    cargo run \
+        --release \
+        --bin '{{ package }}' \
+        -- "$@" \
 
-dev *args: (dev-watch-server args)
-
-dev-watch package *args:
-    RUSTFLAGS='{{rustflags}}' \
-    cargo watch \
-        --clear \
-        --quiet \
-        --watch './crates' \
-        --watch './bins' \
-        --ignore 'crates/app-migration/**/*' \
-        --exec 'run --target "{{rust_target}}" --package "{{package}}" -- {{args}}' \
-
-dev-watch-server *args: (dev-watch 'downloader-hub' args)
-
-dev-watch-cli *args: (dev-watch 'downloader-cli' args)
-
-dev-watch-telegram-bot *args: (dev-watch 'downloader-telegram-bot' args)
-
-dev-watch-build package:
-    RUSTFLAGS='{{rustflags}}' \
-    cargo watch \
-        --clear \
-        --quiet \
-        --watch './crates' \
-        --watch './bins' \
-        --ignore 'crates/app-migration/**/*' \
-        --exec 'build --target "{{rust_target}}" --package "{{package}}"' \
-
-dev-watch-build-server: (dev-watch-build 'downloader-hub')
-
-dev-watch-build-cli: (dev-watch-build 'downloader-cli')
-
-dev-watch-build-telegram-bot: (dev-watch-build 'downloader-telegram-bot')
+build bin:
+    APPLICATION_NAME='{{ bin }}' \
+    cargo build \
+        --release \
+        --bin '{{ bin }}' \
+        --timings
 
 dev-run package *args:
-    RUSTFLAGS='{{rustflags}}' \
+    shift; \
+    APPLICATION_NAME='{{ package }}' \
     cargo run \
-        --target "{{rust_target}}" \
-        --package '{{package}}' \
-        -- {{args}} \
+        --package '{{ package }}' \
+        -- "$@" \
 
-dev-run-server *args: (dev-run 'downloader-hub' args)
+dev-build package *args:
+    shift; \
+    APPLICATION_NAME='{{ package }}' \
+    cargo build \
+        --package '{{ package }}' \
+        "$@"
 
-dev-run-cli *args: (dev-run 'downloader-cli' args)
+dev-watch package *args:
+    shift; \
+    just _watch just dev-run '{{ package }}' "$@"
 
-dev-run-telegram-bot *args: (dev-run 'downloader-telegram-bot' args)
+dev-watch-build package *args:
+    shift; \
+    just _watch just dev-build '{{ package }}' "$@"
 
-migrate +ARGS: && generate-entities
-    cd ./crates/app-migration \
-    && cargo run -- "$@" \
+_watch *args:
+    watchexec \
+        --clear=reset \
+        --restart \
+        --debounce '500ms' \
+        --watch './crates' \
+        --watch './bins' \
+        --stop-signal 'kill' \
+        -- "$@"
 
-migrate-up:
-    just migrate up
+db-dev:
+    cd ./crates/app-database \
+    && bun run dev \
 
-migration-create migration_name:
-    just migrate generate '{{ migration_name }}'
-
-generate-entities:
-    sea-orm-cli generate entity \
-        --with-copy-enums \
-        --with-serde 'serialize' \
-        --model-extra-attributes 'serde(rename_all = "camelCase")' \
-        --serde-skip-hidden-column \
-        --output-dir "./crates/app-entities/src/entities" \
-
-fmt-dev: && fmt
+fmt-dev: lint-fix && fmt
     rustup run nightly cargo fmt --all \
 
 lint:
-    cargo clippy --workspace --all-features -- \
+    cargo clippy \
+        --workspace \
+        --all-features \
+        -- \
 
 lint-fix:
-    cargo clippy --fix --allow-dirty --allow-staged --workspace --all-features -- \
+    cargo clippy \
+        --fix \
+        --allow-dirty \
+        --allow-staged \
+        --workspace \
+        --all-features \
+        -- \
 
-fmt: lint-fix
-    cargo fmt --all \
+fmt:
+    cargo fmt --all 2>/dev/null \
+
+docker-build-all *args:
+    docker buildx bake \
+        --load \
+        "$@"
+
+docker-build target *args:
+    shift; \
+    docker buildx bake \
+        --load \
+        '{{ target }}' \
+        "$@"
+
+[parallel]
+docker-push-all: (docker-push 'allypost/downloader-central') (docker-push 'allypost/downloader-worker') (docker-push 'allypost/downloader-bot')
+
+docker-push tag *args:
+    shift; \
+    docker push '{{ tag }}' "$@"
+
+docker-release-all: docker-build-all docker-push-all
 
 install-cli:
-    RUSTFLAGS='{{rustflags}}' \
     cargo install \
-        --path=./crates/downloader-cli \
+        --path=./bins/downloader-cli \
         --profile=release-cli \
-        --target='{{rust_target}}' \
+    && if [ -n "${INSTALL_LOCATION:-}" ]; then \
+        mv "$HOME/.cargo/bin/downloader-cli" "$INSTALL_LOCATION"; \
+    fi \

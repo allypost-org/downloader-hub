@@ -2,6 +2,7 @@ use std::{
     ffi::OsStr,
     path::{Path, PathBuf},
     process::Stdio,
+    time::Duration,
 };
 
 use app_helpers::{ffprobe, temp_dir::TempDir, trash::move_to_trash};
@@ -12,12 +13,12 @@ use tracing::{debug, trace, warn};
 use crate::{
     config::ActionsConfig,
     fixers::{
+        Fixer, FixerReturn, IntoFixerReturn,
         common::{
+            FixRequest, FixResult,
             command::CmdError,
             crop_filter::{CropError, CropFilter},
-            FixRequest, FixResult,
         },
-        Fixer, FixerReturn, IntoFixerReturn,
     },
 };
 
@@ -137,6 +138,7 @@ async fn do_auto_crop_video(file_path: &Path) -> Result<PathBuf, CropError> {
         .arg(&new_filename)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
+        .stdin(Stdio::null())
         .kill_on_drop(true)
         .status()
         .await
@@ -172,11 +174,20 @@ async fn generate_crop_filter(file_path: &Path) -> Result<CropFilter, CropError>
         .arg(file_path)
         .args(["-vf", "fps=1"])
         .arg(format!("{}/%0d.jpg", tmp_dir.path().to_string_lossy()))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .stdin(Stdio::null())
         .kill_on_drop(true);
     debug!(cmd = ?res.as_std(), "Running command to split video into frames");
-    let res = res
-        .output()
+    let child = res
+        .spawn()
+        .map_err(|e| CropError::CommandError(CmdError::Run(e)))?;
+
+    trace!(?child, "Spawned command to split video into frames");
+
+    let res = tokio::time::timeout(Duration::from_mins(30), child.wait_with_output())
         .await
+        .map_err(|_| CropError::CommandError(CmdError::Timeout))?
         .map_err(|e| CropError::CommandError(CmdError::Run(e)))?;
 
     if !res.status.success() {
@@ -208,7 +219,7 @@ async fn generate_crop_filter(file_path: &Path) -> Result<CropFilter, CropError>
 
             entries.push(path_in_dir);
         }
-        trace!(?entries, "Found all frame files in directory");
+        trace!(entries = ?entries.len(), "Found all frame files in directory");
         entries
     };
 
