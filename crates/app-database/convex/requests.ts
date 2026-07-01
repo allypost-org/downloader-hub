@@ -129,6 +129,8 @@ export const getAllAvailable = query({
   },
 });
 
+const FAILED_GRACE_WINDOW_MS = 60_000;
+
 export const getMineInProgress = query({
   args: {
     authedId: v.id(authedId),
@@ -152,7 +154,22 @@ export const getMineInProgress = query({
       .filterWith(async (row) => row.requester === args.authedId)
       .collect();
 
-    return rows.map((row) => ({
+    const failedCutoff = BigInt(Date.now() - FAILED_GRACE_WINDOW_MS);
+    const recentFailed = (
+      await ctx.db
+        .query(requestsId)
+        .withIndex("by_status_type", (q) =>
+          q.eq("status.Type", requestFailed.Type.value).eq(
+            "requester",
+            args.authedId,
+          ),
+        )
+        .collect()
+    ).filter(
+      (row) => row.status.Type === "failed" && row.status.at >= failedCutoff,
+    );
+
+    return [...rows, ...recentFailed].map((row) => ({
       requestId: row._id,
       info: row.info,
       metadata: row.metadata,
