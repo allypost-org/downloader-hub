@@ -56,29 +56,29 @@ jobs:
             *.cache-from=type=s3,region=${{ vars.CACHE_AWS_REGION }},bucket=${{ vars.CACHE_AWS_BUCKET_NAME }},endpoint_url=${{ vars.CACHE_AWS_ENDPOINT_URL_S3 }},use_path_style=true
             *.cache-to=type=s3,region=${{ vars.CACHE_AWS_REGION }},bucket=${{ vars.CACHE_AWS_BUCKET_NAME }},endpoint_url=${{ vars.CACHE_AWS_ENDPOINT_URL_S3 }},use_path_style=true,upload_parallelism=8,touch_refresh=1h,mode=max
 
-  notify-failed:
-    runs-on: ubuntu-latest
-    needs:
-      - commit_info
-      - build
-    if: failure()
-    steps:
-      - name: Notify chats
-        uses: containrrr/shoutrrr-action@v1
-        with:
-          url: ${{ secrets.SHOUTRRR_URL }}
-          # title: "Failed to build `${{ github.repository }}`"
-          message: |
-            *Repo:* [${{ github.repository }}](https://github.com/${{ github.repository }})
+  # notify-failed:
+  #   runs-on: ubuntu-latest
+  #   needs:
+  #     - commit_info
+  #     - build
+  #   if: failure()
+  #   steps:
+  #     - name: Notify chats
+  #       uses: containrrr/shoutrrr-action@v1
+  #       with:
+  #         url: ${{ secrets.SHOUTRRR_URL }}
+  #         # title: "Failed to build `${{ github.repository }}`"
+  #         message: |
+  #           *Repo:* [${{ github.repository }}](https://github.com/${{ github.repository }})
 
-            *❌ FAILED* build and deploy
+  #           *❌ FAILED* build and deploy
 
-            📝 Commit by [${{ needs.commit_info.outputs.author }}](https://github.com/${{ needs.commit_info.author }}) on [${{ needs.commit_info.outputs.branch }}](https://github.com/tree/${{ needs.commit_info.outputs.branch }}):
-            ```
-            ${{ needs.commit_info.outputs.message }}
-            ```
+  #           📝 Commit by [${{ needs.commit_info.outputs.author }}](https://github.com/${{ needs.commit_info.author }}) on [${{ needs.commit_info.outputs.branch }}](https://github.com/tree/${{ needs.commit_info.outputs.branch }}):
+  #           ```
+  #           ${{ needs.commit_info.outputs.message }}
+  #           ```
 
-            [🌐 Link to build](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) [🕸️ Link to commit](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+  #           [🌐 Link to build](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) [🕸️ Link to commit](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
 
   deploy-and-notify-success:
     runs-on: ubuntu-latest
@@ -92,19 +92,19 @@ jobs:
           curl -sL -v \
             --header 'Authorization: Bearer ${{ secrets.WATCHTOWER_TOKEN }}' \
             "${{ vars.WATCHTOWER_URL }}/v1/update"
-      - name: Notify chats
-        uses: containrrr/shoutrrr-action@v1
-        with:
-          url: ${{ secrets.SHOUTRRR_URL }}
-          # title: "Deployed `${{ github.repository }}`"
-          message: |
-            *Repo:* [${{ github.repository }}](https://github.com/${{ github.repository }})
+      # - name: Notify chats
+      #   uses: containrrr/shoutrrr-action@v1
+      #   with:
+      #     url: ${{ secrets.SHOUTRRR_URL }}
+      #     # title: "Deployed `${{ github.repository }}`"
+      #     message: |
+      #       *Repo:* [${{ github.repository }}](https://github.com/${{ github.repository }})
 
-            *✅ SUCCESS* for build and deploy
+      #       *✅ SUCCESS* for build and deploy
 
-            📝 Commit by [${{ needs.commit_info.outputs.author }}](https://github.com/${{ needs.commit_info.author }}) on [${{ needs.commit_info.outputs.branch }}](https://github.com/tree/${{ needs.commit_info.outputs.branch }}):
-            ```
-            ${{ needs.commit_info.outputs.message }}
-            ```
+      #       📝 Commit by [${{ needs.commit_info.outputs.author }}](https://github.com/${{ needs.commit_info.author }}) on [${{ needs.commit_info.outputs.branch }}](https://github.com/tree/${{ needs.commit_info.outputs.branch }}):
+      #       ```
+      #       ${{ needs.commit_info.outputs.message }}
+      #       ```
 
-            [🌐 Link to build](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) [🕸️ Link to commit](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+      #       [🌐 Link to build](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) [🕸️ Link to commit](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
