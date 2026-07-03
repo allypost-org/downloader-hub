@@ -9,6 +9,8 @@
  */
 
 import type * as authed from "../authed.js";
+import type * as connections from "../connections.js";
+import type * as cron from "../cron.js";
 import type * as helpers_auth from "../helpers/auth.js";
 import type * as requests from "../requests.js";
 
@@ -20,6 +22,8 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   authed: typeof authed;
+  connections: typeof connections;
+  cron: typeof cron;
   "helpers/auth": typeof helpers_auth;
   requests: typeof requests;
 }>;

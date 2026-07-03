@@ -29,8 +29,7 @@ pub trait Action: Debug + Send + Sync {
         ActionsConfig::global().is_enabled(("action", self.name()))
     }
 
-    #[allow(unused_variables)]
-    async fn can_run_for(&self, req: &ActionRequest) -> bool {
+    async fn can_run_for(&self, _req: &ActionRequest) -> bool {
         true
     }
 

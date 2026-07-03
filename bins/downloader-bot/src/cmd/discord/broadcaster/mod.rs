@@ -29,7 +29,6 @@ pub enum BroadcastData {
     Reply(Message, CreateMessage),
     Edit(Message, EditMessage),
     Reaction(Message, ReactionType),
-    Delete(Message),
 }
 
 impl From<CreateMessage> for BroadcastData {

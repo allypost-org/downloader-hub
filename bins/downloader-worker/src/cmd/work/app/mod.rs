@@ -1,86 +1,127 @@
-use std::sync::{Arc, LazyLock};
+use std::{sync::OnceLock, time::Duration};
 
 use app_config::common::PeerCommsWorkerTicketFromApiConfig;
-use app_helpers::futures::task_controller::TaskController;
-use app_peer_comms::message::v1::worker::CommunicationType;
-use futures::StreamExt;
-use socket_sender::SocketSender;
-use tracing::{debug, info, instrument, trace};
-use tungstenite::client::IntoClientRequest;
+use app_peer_comms::{
+    IrohEndpointAddr,
+    message::v1::{
+        central::{
+            get_work_item_result::GetWorkItemResult,
+            work_request::{WorkRequest, WorkRequestInfo},
+        },
+        common::file::FileReference,
+    },
+    rpc::request::{Capabilities, HandlerEntry},
+};
+use tracing::{debug, error, info, instrument};
 
-use crate::cmd::{CmdResult, work::global::JwtData};
+use crate::cmd::CmdResult;
 
 pub(super) mod broadcaster;
-pub(super) mod event_handler;
 pub(super) mod helpers;
-pub(super) mod socket_sender;
+pub(super) mod process;
 
-pub(super) static IS_PROCESSING: LazyLock<tokio::sync::Semaphore> =
-    LazyLock::new(|| tokio::sync::Semaphore::new(1));
+static HEARTBEAT: OnceLock<()> = OnceLock::new();
 
 #[instrument(name = "worker", skip_all)]
-pub async fn run(config: PeerCommsWorkerTicketFromApiConfig) -> CmdResult {
-    debug!("Fetching JWTs");
-    let jwts = JwtData::fetch_with_api_key(config.url.clone(), config.key).await?;
-    trace!(?jwts, "Fetched JWTs");
-    JwtData::init_or_update(jwts).await;
-
-    _ = broadcaster::Broadcaster::init();
-
-    let url = {
-        let mut url = config.url.join("/api/v1/ws")?;
-        let scheme = url.scheme();
-        let new = if scheme == "https" { "wss" } else { "ws" };
-        url.set_scheme(new).map_err(|()| "Failed to set scheme")?;
-        url
+pub async fn run(
+    config: PeerCommsWorkerTicketFromApiConfig,
+    central_addr: IrohEndpointAddr,
+) -> CmdResult {
+    let capabilities = Capabilities::Worker {
+        extractors: app_actions::extractors::AVAILABLE_EXTRACTORS
+            .iter()
+            .filter(|e| e.is_enabled())
+            .map(|e| HandlerEntry {
+                name: e.name().to_string(),
+                description: e.description().to_string(),
+            })
+            .collect(),
+        downloaders: app_actions::downloaders::AVAILABLE_DOWNLOADERS
+            .iter()
+            .map(|d| HandlerEntry {
+                name: d.name().to_string(),
+                description: d.description().to_string(),
+            })
+            .collect(),
+        fixers: app_actions::fixers::AVAILABLE_FIXERS
+            .iter()
+            .map(|f| HandlerEntry {
+                name: f.name().to_string(),
+                description: f.description().to_string(),
+            })
+            .collect(),
     };
 
-    let request = {
-        let mut request = url.clone().into_client_request()?;
-        request.headers_mut().insert(
-            "Authorization",
-            format!("Bearer {}", JwtData::get_token().await)
-                .parse()
-                .expect("Failed to parse header"),
-        );
-        request.headers_mut().append(
-            "Accept",
-            "application/postcard"
-                .parse()
-                .expect("Failed to parse header"),
-        );
-        request.headers_mut().append(
-            "Accept",
-            "application/json".parse().expect("Failed to parse header"),
-        );
-        request
-    };
+    crate::cmd::work::rpc::RpcClient::init(config.key.clone(), central_addr, capabilities).await?;
 
-    debug!(url = ?url.as_str(), "Connecting to the API");
+    broadcaster::Broadcaster::init();
 
-    let (stream, _response) = tokio_tungstenite::connect_async(request).await?;
-
-    info!("Connected to the API and ready to receive messages");
-
-    let (sender, receiver) = stream.split();
-
-    let sender = Arc::new(SocketSender::new(sender, CommunicationType::postcard()));
-
-    let mut controller = TaskController::new();
-
-    controller.spawn({
-        let sender = sender.clone();
-        async move {
-            let mut rx = broadcaster::Broadcaster::get().recv();
-            while let Ok(msg) = rx.recv().await {
-                sender.send_message(msg.as_ref().clone()).await;
+    HEARTBEAT.get_or_init(|| {
+        tokio::spawn(async {
+            loop {
+                let jitter = rand::random_range(0..5_000u64);
+                tokio::time::sleep(Duration::from_millis(30_000 + jitter)).await;
+                if let Err(e) = crate::cmd::work::rpc::RpcClient::heartbeat().await {
+                    debug!(?e, "heartbeat failed");
+                }
             }
-        }
+        });
     });
 
-    event_handler::handle_socket(receiver, sender.clone()).await?;
+    info!("Connected to central (irpc); waiting for work via getWorkItem");
 
-    sender.close(None).await;
+    loop {
+        let work_request = match crate::cmd::work::rpc::RpcClient::get_work_item().await {
+            Ok(GetWorkItemResult::Ok(item)) => *item,
+            Ok(GetWorkItemResult::BackendError) => {
+                error!("central reported a backend error on getWorkItem");
+                return Err("central backend error".into());
+            }
+            Ok(GetWorkItemResult::Unauthorized) => {
+                error!(
+                    "this worker is not authorized to receive work items; \
+                     the API key is likely revoked or expired. Terminating."
+                );
+                std::process::exit(1);
+            }
+            Err(e) => {
+                error!(?e, "getWorkItem failed");
+                return Err(e.into());
+            }
+        };
 
-    Ok(())
+        if can_process(&work_request).await {
+            debug!(id = %work_request.request_id(), "Processing work item");
+            process::process_work_request(work_request).await;
+        } else {
+            debug!(id = %work_request.request_id(), "Cannot process work item; refusing");
+            if let Err(e) =
+                crate::cmd::work::rpc::RpcClient::refuse_work_item(work_request.request_id()).await
+            {
+                error!(?e, "refuse_work_item failed");
+            }
+        }
+    }
+}
+
+async fn can_process(work_request: &WorkRequest) -> bool {
+    match &work_request.info {
+        WorkRequestInfo::DownloadAndFix(file_reference) => {
+            can_process_download_and_fix(file_reference).await
+        }
+    }
+}
+
+async fn can_process_download_and_fix(file_reference: &FileReference) -> bool {
+    match file_reference {
+        FileReference::BlobTicket(_) => true,
+        FileReference::Url(url) => {
+            debug!("Checking if worker can process URL item");
+            let Ok(req) = helpers::extract_info_request::file_url_to_extract_info_request(url)
+            else {
+                return false;
+            };
+            req.first_available_extractor().await.is_some()
+        }
+    }
 }

@@ -64,6 +64,15 @@ pub enum BotCommand {
     /// The resulting files will be sent as a reply to the message that triggered the command.
     #[clap(visible_aliases = ["df"])]
     DownloadAndFix { urls: Vec<url::Url> },
+
+    /// List the available extractors (URL handlers).
+    ListExtractors,
+
+    /// List the available downloaders.
+    ListDownloaders,
+
+    /// List the available fixers (post-processors).
+    ListFixers,
 }
 impl BotCommand {
     pub fn parse(s: &str) -> Result<Self, clap::Error> {
@@ -103,7 +112,12 @@ impl EventHandler for Handler {
 
         tokio::task::spawn(async move {
             loop {
-                _ = handlers::work_request::watch_work_requests().await;
+                if let Err(e) = handlers::work_request::watch_work_requests().await {
+                    warn!(?e, "Work requests watcher exited with error");
+                    if let Err(re) = crate::peering::reconnect().await {
+                        warn!(?re, "Failed to re-bootstrap irpc session; will retry");
+                    }
+                }
 
                 let about_two_seconds = 2000 + rand::random_range(0..=2000);
                 let about_two_seconds = std::time::Duration::from_millis(about_two_seconds);
@@ -221,6 +235,19 @@ impl EventHandler for Handler {
                 let combined_urls = if cmd_urls.is_empty() { urls } else { cmd_urls };
                 handlers::message::handle_download_request(&msg, combined_urls).await;
             }
+            BotCommand::ListExtractors | BotCommand::ListDownloaders | BotCommand::ListFixers => {
+                use crate::cmd::_common::capabilities::{CapabilityKind, fetch, render};
+                let kind = match cmd {
+                    BotCommand::ListExtractors => CapabilityKind::Extractors,
+                    BotCommand::ListDownloaders => CapabilityKind::Downloaders,
+                    _ => CapabilityKind::Fixers,
+                };
+                let text = fetch().await.map_or_else(
+                    || "Failed to fetch capabilities from central.".to_string(),
+                    |summary| render(kind, &summary),
+                );
+                _ = msg.reply(&ctx, text).await;
+            }
         }
     }
 }
@@ -247,10 +274,6 @@ async fn handle_broadcast(broadcast: Broadcast, ctx: Arc<Context>) -> Result<(),
         BroadcastData::Reaction(msg, reaction) => {
             trace!(?msg, ?reaction, "Reaction message");
             msg.react(&ctx, reaction.clone()).await?;
-        }
-        BroadcastData::Delete(msg) => {
-            trace!(?msg, "Delete message");
-            msg.delete(&ctx).await?;
         }
     }
 

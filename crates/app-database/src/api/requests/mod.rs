@@ -53,6 +53,8 @@ pub struct RequestInfoResponse {
     pub status: RequestStatus,
     #[serde(default)]
     pub errors: Arc<[Arc<str>]>,
+    #[serde(rename = "refusedBy", default)]
+    pub refused_by: Arc<[Arc<str>]>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,6 +116,16 @@ impl Database {
     > {
         DatabaseRequest::named("requests:getAllAvailable")
             .watch_query(self)
+            .await
+    }
+}
+
+impl Database {
+    pub async fn requests_get_all_available(
+        &self,
+    ) -> Result<Arc<[RequestInfoResponse]>, DatabaseError> {
+        DatabaseRequest::named("requests:getAllAvailable")
+            .query(self)
             .await
     }
 }
@@ -196,6 +208,68 @@ impl Database {
         DatabaseRequest::named("requests:free")
             .with_arg("requestId", request_id.as_ref())
             .with_arg("takerId", taker_id.as_ref())
+            .mutate(self)
+            .await
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "code")]
+pub enum RefuseResult {
+    RequestNotFound,
+    RequestNotInProgress,
+    RequestNotTakenByYou,
+    Ok,
+}
+impl Database {
+    pub async fn requests_refuse(
+        &self,
+        request_id: Arc<str>,
+        taker_id: Arc<str>,
+    ) -> Result<RefuseResult, DatabaseError> {
+        DatabaseRequest::named("requests:refuse")
+            .with_arg("requestId", request_id.as_ref())
+            .with_arg("takerId", taker_id.as_ref())
+            .mutate(self)
+            .await
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "code")]
+pub enum ReleaseResult {
+    RequestNotFound,
+    RequestNotInProgress,
+    RequestNotTakenByYou,
+    Ok,
+}
+impl Database {
+    pub async fn requests_release(
+        &self,
+        request_id: Arc<str>,
+        taker_id: Arc<str>,
+    ) -> Result<ReleaseResult, DatabaseError> {
+        DatabaseRequest::named("requests:release")
+            .with_arg("requestId", request_id.as_ref())
+            .with_arg("takerId", taker_id.as_ref())
+            .mutate(self)
+            .await
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "code")]
+pub enum ClearRefusalsResult {
+    RequestNotFound,
+    Ok,
+}
+impl Database {
+    pub async fn requests_clear_refusals(
+        &self,
+        request_id: Arc<str>,
+    ) -> Result<ClearRefusalsResult, DatabaseError> {
+        DatabaseRequest::named("requests:clearRefusals")
+            .with_arg("requestId", request_id.as_ref())
             .mutate(self)
             .await
     }

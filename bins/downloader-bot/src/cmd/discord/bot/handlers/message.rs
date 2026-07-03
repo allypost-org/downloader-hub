@@ -1,23 +1,19 @@
 use app_helpers::ip::url_resolves_to_valid_ip;
-use app_peer_comms::{
-    Message as PeerMessage,
-    message::v1::{
-        V1Message,
-        central::{CentralMessage, create_result::CreateResult},
-        common::{
-            file::{FileReference, FileUrl},
-            request_info::RequestInfo,
-        },
+use app_peer_comms::message::v1::{
+    central::create_result::CreateResult,
+    common::{
+        file::{FileReference, FileUrl},
+        request_info::RequestInfo,
     },
 };
 use linkify::{LinkFinder, LinkKind};
 use serenity::all::Message;
-use tracing::{info, trace, warn};
+use tracing::{info, warn};
 use url::Url;
 
 use crate::{
     cmd::discord::bot::{discord_bot::DiscordBot, helpers::status_message::StatusMessage},
-    peering::rpc::{RpcClient, RpcResponse},
+    peering::rpc::RpcClient,
 };
 
 #[tracing::instrument(name = "discord-download", skip(msg, urls))]
@@ -38,7 +34,7 @@ pub async fn handle_download_request(msg: &Message, mut urls: Vec<Url>) {
 
     status_message.update_message("Processing message...").await;
 
-    let max_bytes: u64 = DiscordBot::max_payload_bytes();
+    let max_bytes = DiscordBot::max_payload_bytes();
     let mut added_some = false;
 
     for (i, url) in urls.into_iter().enumerate() {
@@ -71,20 +67,17 @@ pub async fn handle_download_request(msg: &Message, mut urls: Vec<Url>) {
         let file_url = file_url.with_max_filesize(Some(max_bytes));
         let file_ref = FileReference::url(file_url);
 
-        let resp = RpcClient::work_request_create(
+        let result = match RpcClient::work_request_create(
             RequestInfo::DownloadAndFix(file_ref),
             url_status_message.to_metadata(),
             Some(format!("discord-{}-{}-{}", msg.channel_id, msg.id, i)),
         )
-        .await;
-
-        trace!(?resp, "Got RPC response");
-
-        let resp = match resp {
-            Ok(RpcResponse::Data(data)) => data,
-            Ok(RpcResponse::Error(e)) => {
+        .await
+        {
+            Ok(CreateResult::Ok(result)) => result,
+            Ok(_) => {
                 url_status_message
-                    .update_message(&format!("Failed to add URL to queue: {}", e))
+                    .update_message("Failed to add URL to queue: central error")
                     .await;
                 continue;
             }
@@ -94,27 +87,6 @@ pub async fn handle_download_request(msg: &Message, mut urls: Vec<Url>) {
                     .await;
                 continue;
             }
-        };
-
-        let Some(PeerMessage::V1(V1Message::Central(CentralMessage::WorkRequestCreateResponse(
-            result,
-        )))) = resp
-        else {
-            url_status_message
-                .update_message(
-                    "Failed to add request to queue: Got unknown response. Please report this to \
-                     the bot developer.",
-                )
-                .await;
-            continue;
-        };
-
-        #[allow(irrefutable_let_patterns)]
-        let CreateResult::Ok(result) = result else {
-            url_status_message
-                .update_message("Failed to add request to queue")
-                .await;
-            continue;
         };
 
         url_status_message

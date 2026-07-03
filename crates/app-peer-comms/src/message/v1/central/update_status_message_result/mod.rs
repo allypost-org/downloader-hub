@@ -37,30 +37,6 @@ impl
     }
 }
 
-impl From<UpdateStatusMessageResult> for super::CentralMessage {
-    fn from(value: UpdateStatusMessageResult) -> Self {
-        Self::WorkRequestUpdateStatusMessageResult(value)
-    }
-}
-
-impl
-    From<(
-        RequestId,
-        app_database::api::requests::UpdateStatusMessageResult,
-    )> for super::CentralMessage
-{
-    fn from(
-        value: (
-            RequestId,
-            app_database::api::requests::UpdateStatusMessageResult,
-        ),
-    ) -> Self {
-        let value: UpdateStatusMessageResult = value.into();
-
-        value.into()
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum UpdateStatusMessageResultStatus {
@@ -68,6 +44,8 @@ pub enum UpdateStatusMessageResultStatus {
     RequestNotInProgress,
     RequestNotTakenByYou,
     Ok,
+    BackendError,
+    Unauthorized,
 }
 
 impl From<app_database::api::requests::UpdateStatusMessageResult>

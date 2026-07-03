@@ -3,7 +3,6 @@ use std::{collections::BTreeMap, sync::OnceLock};
 use app_config::common::DatabaseConfig;
 use convex::{ConvexClient, ConvexClientBuilder, FunctionResult, WebSocketState};
 use futures::StreamExt;
-use tokio::sync::Mutex;
 use tracing::{debug, instrument, trace};
 
 use crate::error::{DatabaseError, ResponseError};
@@ -11,7 +10,7 @@ use crate::error::{DatabaseError, ResponseError};
 static GLOBAL: OnceLock<Database> = OnceLock::new();
 
 pub struct Database {
-    client: Mutex<ConvexClient>,
+    client: ConvexClient,
 }
 
 impl Database {
@@ -71,9 +70,7 @@ impl Database {
         .await
         .map_err(|e| DatabaseError::FailedToConnect(e.into()))?;
 
-        Ok(Self {
-            client: Mutex::new(client),
-        })
+        Ok(Self { client })
     }
 
     pub async fn query<T>(
@@ -86,8 +83,7 @@ impl Database {
     {
         let res = self
             .client
-            .lock()
-            .await
+            .clone()
             .query(name, args)
             .await
             .map_err(DatabaseError::Base)?;
@@ -105,8 +101,7 @@ impl Database {
     {
         let res = self
             .client
-            .lock()
-            .await
+            .clone()
             .mutation(name, args)
             .await
             .map_err(DatabaseError::Base)?;
@@ -123,8 +118,7 @@ impl Database {
         T: serde::de::DeserializeOwned,
     {
         self.client
-            .lock()
-            .await
+            .clone()
             .subscribe(name, args)
             .await
             .map_err(DatabaseError::Base)

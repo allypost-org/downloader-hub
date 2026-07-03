@@ -19,3 +19,13 @@ impl Validate for CmdConfig {
         }
     }
 }
+
+impl CmdConfig {
+    #[must_use]
+    pub const fn platform(&self) -> &'static str {
+        match self {
+            Self::Telegram(_) => "telegram",
+            Self::Discord(_) => "discord",
+        }
+    }
+}

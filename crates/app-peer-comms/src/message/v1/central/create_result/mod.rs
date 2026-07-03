@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub enum CreateResult {
     Ok(CreateResultData),
+    BackendError,
+    Unauthorized,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

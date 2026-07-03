@@ -4,15 +4,11 @@ use std::{
 };
 
 use app_helpers::temp_file::TempFile;
-use app_peer_comms::{
-    Message as PeerMessage,
-    message::v1::{
-        V1Message,
-        central::{CentralMessage, create_result::CreateResult, work_request::WorkRequest},
-        common::{
-            file::{FileReference, FileUrl},
-            request_info::RequestInfo,
-        },
+use app_peer_comms::message::v1::{
+    central::{create_result::CreateResult, work_request::WorkRequest},
+    common::{
+        file::{FileReference, FileUrl},
+        request_info::RequestInfo,
     },
 };
 use futures::future;
@@ -38,7 +34,7 @@ use crate::{
             common::downloadable::Downloadable,
         },
     },
-    peering::rpc::{RpcClient, RpcResponse},
+    peering::rpc::RpcClient,
 };
 
 pub async fn handle_message(msg: &TelegramMessage) -> ResponseResult<()> {
@@ -70,7 +66,7 @@ pub async fn handle_message(msg: &TelegramMessage) -> ResponseResult<()> {
             .await
             .unwrap_or_else(|| status_message.clone());
 
-        let resp = RpcClient::work_request_create(
+        let result = match RpcClient::work_request_create(
             RequestInfo::DownloadAndFix({
                 let file_url: FileUrl = file_url.into();
 
@@ -81,15 +77,12 @@ pub async fn handle_message(msg: &TelegramMessage) -> ResponseResult<()> {
             url_status_message.to_metadata(),
             Some(format!("tg-{}-{}-{}", msg.chat.id, msg.id, i)),
         )
-        .await;
-
-        trace!(?resp, "Got RPC response");
-
-        let resp = match resp {
-            Ok(RpcResponse::Data(data)) => data,
-            Ok(RpcResponse::Error(e)) => {
+        .await
+        {
+            Ok(CreateResult::Ok(result)) => result,
+            Ok(_) => {
                 url_status_message
-                    .update_message(&format!("Failed to add URL to queue: {}", e))
+                    .update_message("Failed to add URL to queue: central error")
                     .await;
 
                 continue;
@@ -101,29 +94,6 @@ pub async fn handle_message(msg: &TelegramMessage) -> ResponseResult<()> {
 
                 continue;
             }
-        };
-
-        let Some(PeerMessage::V1(V1Message::Central(CentralMessage::WorkRequestCreateResponse(
-            result,
-        )))) = resp
-        else {
-            url_status_message
-                .update_message(
-                    "Failed to add request to queue: Got unknown response. Please report this to \
-                     the bot developer.",
-                )
-                .await;
-
-            continue;
-        };
-
-        #[allow(irrefutable_let_patterns)]
-        let CreateResult::Ok(result) = result else {
-            url_status_message
-                .update_message("Failed to add request to queue")
-                .await;
-
-            continue;
         };
 
         url_status_message
@@ -149,7 +119,7 @@ pub async fn handle_message(msg: &TelegramMessage) -> ResponseResult<()> {
     Ok(())
 }
 
-#[tracing::instrument(name="process-work-request", skip_all, fields(request_id = ?work_request.request_id))]
+#[tracing::instrument(name="process-work-request", skip_all, fields(request_id = ?work_request.request_id()))]
 #[allow(clippy::too_many_lines)]
 pub async fn process_work_request(
     work_request: Arc<WorkRequest>,
@@ -158,11 +128,11 @@ pub async fn process_work_request(
     static WORK_REQUESTS_PROCESSING_LOCKS: LazyLock<Arc<Mutex<WorkRequestLockMap>>> =
         LazyLock::new(|| Arc::new(Mutex::new(WorkRequestLockMap::new())));
 
-    let request_id = work_request.request_id.clone();
+    let request_id = work_request.request_id();
 
     debug!(request = ?work_request, "Start processing work request");
 
-    let status = &work_request.status;
+    let status = &work_request.status();
 
     if status.is_pending() {
         trace!("Work request is pending");
@@ -333,7 +303,7 @@ pub async fn process_work_request(
             for (_path, err) in failed_files {
                 errs.push(format!("Failed to upload file: {}", err));
             }
-            for err in work_request.errors.iter() {
+            for err in work_request.errors() {
                 errs.push(err.to_string());
             }
             errs

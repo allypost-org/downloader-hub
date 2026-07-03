@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Database, DatabaseError, DatabaseRequest, entity::authed::AuthedForRole};
+use crate::{
+    Database, DatabaseError, DatabaseRequest, entity::authed::AuthedForRole, error::ResponseError,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "Type", rename_all = "kebab-case")]
@@ -23,7 +25,12 @@ pub struct AuthedInfo {
     pub for_role: AuthedForRole,
     #[serde(rename = "onlyTagged", default)]
     pub only_tagged: Arc<[String]>,
-    pub expires_at: Option<i64>,
+    #[serde(
+        with = "crate::helpers::serde::bigint::option",
+        default,
+        rename = "expiresAt"
+    )]
+    pub expires_at: Option<u64>,
 }
 impl Database {
     pub async fn authed_get_info_by_token(
@@ -45,6 +52,27 @@ impl Database {
         DatabaseRequest::named("authed:getInfoById")
             .with_arg("id", id.as_ref())
             .query(self)
+            .await
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthedIdWithExpiry {
+    pub id: Arc<str>,
+    #[serde(with = "crate::helpers::serde::bigint::option", default)]
+    pub expires_at: Option<u64>,
+}
+
+impl Database {
+    pub async fn authed_watch_all(
+        &self,
+    ) -> Result<
+        impl futures::stream::Stream<Item = Result<Arc<[AuthedIdWithExpiry]>, ResponseError>>,
+        DatabaseError,
+    > {
+        DatabaseRequest::named("authed:getAll")
+            .watch_query(self)
             .await
     }
 }

@@ -33,8 +33,8 @@ pub async fn run(config: DiscordConfig) -> CmdResult {
                     "It is powered by Rust, yt-dlp, ffmpeg, and some external services.".to_string(),
                     "The source code is available [on GitHub](https://github.com/allynet/downloader-hub/tree/main/bins/downloader-bot)"
                         .to_string(),
-                    // "You can find out about the available downloaders and fixers, and what they do by using the /list_extractors, /list_downloaders and /list_fixers commands."
-                    // .to_string(),
+                    "You can find out about the available extractors, downloaders and fixers by using the /list_extractors, /list_downloaders and /list_fixers commands."
+                        .to_string(),
                     "No data about downloading/users is stored outside of logs that live in RAM".to_string(),
                 ];
 

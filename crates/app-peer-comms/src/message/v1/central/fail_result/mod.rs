@@ -29,20 +29,6 @@ impl From<(RequestId, app_database::api::requests::FailResult)> for FailResult {
     }
 }
 
-impl From<FailResult> for super::CentralMessage {
-    fn from(value: FailResult) -> Self {
-        Self::WorkRequestFailResult(value)
-    }
-}
-
-impl From<(RequestId, app_database::api::requests::FailResult)> for super::CentralMessage {
-    fn from(value: (RequestId, app_database::api::requests::FailResult)) -> Self {
-        let value: FailResult = value.into();
-
-        value.into()
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum FailResultStatus {
@@ -53,6 +39,8 @@ pub enum FailResultStatus {
         reason: String,
         requester_id: Arc<str>,
     },
+    BackendError,
+    Unauthorized,
 }
 
 impl From<app_database::api::requests::FailResult> for FailResultStatus {

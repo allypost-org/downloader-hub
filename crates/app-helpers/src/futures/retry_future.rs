@@ -25,6 +25,7 @@ pub struct RetryConfig {
     pub retry_delays: Arc<[Duration]>,
     pub reset_retries_after: Option<Duration>,
     pub jitter: RetryJitter,
+    pub max_total_attempts: Option<usize>,
 }
 
 impl RetryConfig {
@@ -50,6 +51,12 @@ impl RetryConfig {
         self.jitter = jitter;
         self
     }
+
+    #[must_use]
+    pub const fn with_max_total_attempts(mut self, max_total_attempts: Option<usize>) -> Self {
+        self.max_total_attempts = max_total_attempts;
+        self
+    }
 }
 
 impl Default for RetryConfig {
@@ -58,6 +65,7 @@ impl Default for RetryConfig {
             retry_delays: DEFAULT_RETRY_DELAYS.into(),
             reset_retries_after: None,
             jitter: RetryJitter::default(),
+            max_total_attempts: None,
         }
     }
 }
@@ -106,14 +114,30 @@ async fn run_retried_impl<F, T>(
 where
     F: std::future::Future<Output = RetriedResult<T>>,
 {
+    const TAIL_LOOP: usize = 3;
+    const TAIL_WARN_EVERY: usize = 10;
+
     let mut tries = 0;
+    let mut tail_iters: usize = 0;
+
     loop {
-        let Some(sleep_time) = config.retry_delays.get(tries) else {
-            warn!(
-                ?tries,
-                "{} has been misbehaving too many times, giving up", name
-            );
-            return (name, Err("Too many retries".into()));
+        let sleep_time = match config.retry_delays.len() {
+            0 => Duration::ZERO,
+            len if tries < len => config.retry_delays[tries],
+            len => {
+                let tail = len.saturating_sub(TAIL_LOOP);
+                let cycle = len - tail;
+                let idx = tail + (tries - len) % cycle;
+                tail_iters = tail_iters.saturating_add(1);
+                if tail_iters == 1 || tail_iters.is_multiple_of(TAIL_WARN_EVERY) {
+                    warn!(
+                        ?tries,
+                        tail_iters,
+                        "Backoff schedule exhausted; looping the last {TAIL_LOOP} delays forever"
+                    );
+                }
+                config.retry_delays[idx]
+            }
         };
         let sleep_time = {
             #[allow(clippy::cast_possible_truncation)]
@@ -126,10 +150,10 @@ where
                 RetryJitter::Fixed(duration) => duration,
             };
 
-            *sleep_time + jitter
+            sleep_time + jitter
         };
 
-        info!(?tries, "Starting {}", name);
+        info!(?tries, "Starting {name}");
 
         let started_at = Instant::now();
         match f().await {
@@ -137,10 +161,10 @@ where
                 if return_on_success {
                     return (name, Ok(x));
                 }
-                info!("{} exited successfully", name);
+                info!("{name} exited successfully");
             }
             Err(e) => {
-                warn!(?e, "{} exited with error", name);
+                warn!(?e, "{name} exited with error");
             }
         }
 
@@ -149,18 +173,32 @@ where
         {
             debug!(
                 prev_tries = tries,
-                "{} has been behaving {:?}, resetting retry counter", name, reset_retries_after,
+                "{name} has been behaving {reset_retries_after:?}, resetting retry counter",
             );
             tries = 0;
+            tail_iters = 0;
         }
 
-        tries += 1;
+        tries = tries.saturating_add(1);
+
+        if let Some(max) = config.max_total_attempts
+            && tries > max
+        {
+            warn!(
+                ?tries,
+                max, "{name} exhausted max_total_attempts; giving up"
+            );
+            return (
+                name,
+                Err(format!("{name} exhausted max_total_attempts ({max})").into()),
+            );
+        }
+
         debug!(
             ?tries,
             ?sleep_time,
             last_ran_ago = ?started_at.elapsed(),
-            "Retrying {} after delay",
-            name,
+            "Retrying {name} after delay",
         );
         sleep(sleep_time).await;
     }

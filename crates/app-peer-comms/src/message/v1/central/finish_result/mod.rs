@@ -7,6 +7,8 @@ pub enum FinishResult {
     RequestNotInProgress,
     RequestNotSubmittedByYou,
     Ok,
+    BackendError,
+    Unauthorized,
 }
 
 impl FinishResult {
@@ -28,19 +30,5 @@ impl From<app_database::api::requests::FinishResult> for FinishResult {
             }
             app_database::api::requests::FinishResult::Ok => Self::Ok,
         }
-    }
-}
-
-impl From<FinishResult> for super::CentralMessage {
-    fn from(value: FinishResult) -> Self {
-        Self::WorkRequestFinishResponse(value)
-    }
-}
-
-impl From<app_database::api::requests::FinishResult> for super::CentralMessage {
-    fn from(value: app_database::api::requests::FinishResult) -> Self {
-        let value: FinishResult = value.into();
-
-        value.into()
     }
 }

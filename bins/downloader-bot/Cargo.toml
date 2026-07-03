@@ -13,6 +13,7 @@ app-helpers.workspace = true
 app-logger.workspace = true
 app-peer-comms.workspace = true
 app-requests.workspace = true
+arc-swap.workspace = true
 clap.workspace = true
 const_format = "0.2.35"
 dotenvy = "0.15.7"

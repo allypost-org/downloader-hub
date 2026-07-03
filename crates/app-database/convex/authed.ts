@@ -92,3 +92,17 @@ export const getInfoById = query({
     } as const;
   },
 });
+
+export const getAll = query({
+  args: {},
+  returns: v.array(
+    v.object({
+      id: v.id(authedId),
+      expiresAt: v.optional(v.int64()),
+    }),
+  ),
+  handler: async (ctx) => {
+    const all = await ctx.db.query(authedId).collect();
+    return all.map((doc) => ({ id: doc._id, expiresAt: doc.expiresAt }));
+  },
+});

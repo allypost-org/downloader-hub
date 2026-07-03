@@ -11,11 +11,13 @@
 **/docker-compose.*.yml
 **/compose.yaml
 **/compose.*.yaml
+docker-bake.hcl
 
 # misc
 **/.DS_Store
 LICENSE
 **/README.md
+**/AGENTS.md
 config/
 test-media/
 .github/
@@ -26,6 +28,7 @@ mprocs.yaml
 .bruno
 justfile
 .editorconfig
+docs/
 
 # artefacts
 target/

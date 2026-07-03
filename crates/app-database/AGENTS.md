@@ -24,3 +24,5 @@ Three tables:
 - `downloader_hub_outbox` — messages broadcast to peer audiences.
 
 When adding a field/table, update **both** `convex/schema.ts` (plus the relevant function file) and the Rust entity mirror under `src/entity/`.
+
+ALWAYS run `bun run check` after making changes to any of the convex files.

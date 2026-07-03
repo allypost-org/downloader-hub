@@ -44,15 +44,16 @@ impl ExtractInfoRequest {
             .flatten()
     }
 
-    pub async fn first_available_extractor(&self) -> Option<handlers::ExtractorEntry> {
-        let mut it = self.extractors();
-        while let Some((can_handle, extractor)) = it.next().await {
-            if can_handle {
-                return Some(extractor);
-            }
-        }
+    pub fn available_extractors(&self) -> impl futures::Stream<Item = handlers::ExtractorEntry> {
+        self.extractors()
+            .filter(|(can_handle, extractor)| {
+                futures::future::ready(*can_handle && extractor.is_enabled())
+            })
+            .map(|(_, extractor)| extractor)
+    }
 
-        None
+    pub async fn first_available_extractor(&self) -> Option<handlers::ExtractorEntry> {
+        self.available_extractors().next().await
     }
 
     pub async fn extract_info(&self) -> Result<ExtractedInfo, String> {

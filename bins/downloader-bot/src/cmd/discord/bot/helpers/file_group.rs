@@ -3,7 +3,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use app_helpers::file_type::{infer_file_type, mime};
 use futures::{StreamExt, stream::FuturesUnordered};
 use serenity::all::CreateAttachment;
 use tokio::sync::Mutex;
@@ -101,8 +100,6 @@ struct FileInfo {
     path: PathBuf,
     suggested_name: Option<PathBuf>,
     metadata: std::fs::Metadata,
-    #[allow(dead_code)]
-    mime: Option<mime::Mime>,
 }
 
 async fn infos_from_files<TFiles, TFile, TName>(
@@ -123,13 +120,6 @@ where
             let failed = failed.clone();
 
             async move {
-                let mime = {
-                    let file_path = file_path.clone();
-                    tokio::task::spawn_blocking(move || infer_file_type(&file_path).ok())
-                        .await
-                        .ok()?
-                };
-
                 let metadata = match tokio::fs::metadata(&file_path).await {
                     Ok(meta) => meta,
                     Err(e) => {
@@ -146,7 +136,6 @@ where
                     path: file_path,
                     suggested_name,
                     metadata,
-                    mime,
                 })
             }
         })

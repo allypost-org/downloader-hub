@@ -54,6 +54,7 @@ export const requests = {
   errors: v.array(v.string()),
   metadata: v.optional(v.record(v.string(), v.string())),
   lastModified: v.int64(),
+  refusedBy: v.optional(v.array(v.id(authedId))),
 };
 
 export const outboxId = "downloader_hub_outbox" as const;
@@ -61,6 +62,16 @@ export const outbox = {
   message: v.union(v.bytes(), v.string()),
   audiences: v.optional(v.bytes()),
   sentBy: v.id(authedId),
+};
+
+export const connectionsId = "downloader_hub_connections" as const;
+export const connections = {
+  central: v.string(),
+  authed: v.id(authedId),
+  role: v.union(v.literal("worker"), v.literal("bot")),
+  capabilities: v.optional(v.string()),
+  version: v.optional(v.string()),
+  lastSeen: v.int64(),
 };
 
 export default defineSchema(
@@ -72,6 +83,10 @@ export default defineSchema(
       .index("by_idempotency_key", ["idempotencyKey"]),
 
     [outboxId]: defineTable(outbox).index("by_sentBy", ["sentBy"]),
+
+    [connectionsId]: defineTable(connections)
+      .index("by_central_authed", ["central", "authed"])
+      .index("by_last_seen", ["lastSeen"]),
   },
   {
     schemaValidation: true,

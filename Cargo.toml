@@ -3,7 +3,7 @@ members = ["crates/*", "bins/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.8.2"
+version = "0.9.0"
 authors = ["Allypost"]
 description = "A meme downloader"
 edition = "2024"
@@ -20,6 +20,7 @@ app-peer-comms = { version = "*", path = "crates/app-peer-comms" }
 app-requests = { version = "*", path = "crates/app-requests" }
 app-tasks = { version = "*", path = "crates/app-tasks" }
 anyhow = "1.0.102"
+arc-swap = "1.9"
 async-trait = "0.1.89"
 chrono = { version = "0.4.45", features = ["alloc", "serde"] }
 clap = { version = "4.6.1", features = ["derive", "env"] }
@@ -48,6 +49,8 @@ missing_errors_doc = "allow"
 no_effect_underscore_binding = "allow"
 cognitive_complexity = "allow"
 unnecessary_debug_formatting = "allow"
+redundant_type_annotations = "warn"
+needless_collect = "warn"
 
 [profile.release]
 strip = true

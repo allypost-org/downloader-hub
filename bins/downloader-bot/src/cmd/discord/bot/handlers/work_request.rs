@@ -39,34 +39,16 @@ pub async fn watch_work_requests() -> Result<(), anyhow::Error> {
 
     debug!("Connected to work requests watcher");
 
-    while let Some(ws_msg) = reqs_it.next().await {
-        let ws_msg = match ws_msg {
-            Ok(x) => x,
-            Err(e) => {
-                error!(?e, "Got error from work requests watcher socket");
-                return Err(e.into());
-            }
-        };
-
-        let msg_bytes = match ws_msg {
-            tokio_tungstenite::tungstenite::Message::Binary(x) => x,
-            tokio_tungstenite::tungstenite::Message::Text(x) => x.into(),
-            msg => {
-                trace!(?msg, "Got unknown message type");
-                continue;
-            }
-        };
-
-        let work_requests = match serde_json::from_slice::<Arc<[Arc<WorkRequest>]>>(&msg_bytes) {
-            Ok(x) => x,
-            Err(e) => {
-                warn!(?e, "Failed to parse work request");
-                continue;
-            }
-        };
-
-        for req in work_requests.iter() {
-            let status_message = match StatusMessage::from_metadata(&req.metadata) {
+    while let Some(snapshot) = match reqs_it.recv().await {
+        Ok(x) => x,
+        Err(e) => {
+            error!(?e, "Got error from work requests watcher");
+            return Err(e.into());
+        }
+    } {
+        for req in snapshot.requests.iter().cloned() {
+            let req = Arc::new(req);
+            let status_message = match StatusMessage::from_metadata(req.metadata()) {
                 Ok(x) => x,
                 Err(e) => {
                     error!(?e, "Failed to get status message");
@@ -81,17 +63,17 @@ pub async fn watch_work_requests() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-#[tracing::instrument(name = "discord-work-request", skip_all, fields(request_id = ?work_request.request_id))]
+#[tracing::instrument(name = "discord-work-request", skip_all, fields(request_id = ?work_request.request_id()))]
 #[allow(clippy::too_many_lines)]
 pub async fn process_work_request(
     work_request: Arc<WorkRequest>,
     mut status_message: StatusMessage,
 ) {
-    let request_id = work_request.request_id.clone();
+    let request_id = work_request.request_id();
 
     debug!(request = ?work_request, "Start processing work request");
 
-    let status = &work_request.status;
+    let status = work_request.status();
 
     if status.is_pending() {
         trace!("Work request is pending");
@@ -241,7 +223,7 @@ pub async fn process_work_request(
         debug!("Copied files to download directory");
     }
 
-    let max_bytes: u64 = DiscordBot::max_payload_bytes();
+    let max_bytes = DiscordBot::max_payload_bytes();
 
     let failed_files = send_attachment_groups(
         downloaded_files.iter().map(|(f, n)| (f, n.as_ref())),
@@ -273,7 +255,7 @@ pub async fn process_work_request(
         for (_path, err) in failed_files {
             errs.push(format!("Failed to upload file: {}", err));
         }
-        for err in work_request.errors.iter() {
+        for err in work_request.errors() {
             errs.push(err.to_string());
         }
 

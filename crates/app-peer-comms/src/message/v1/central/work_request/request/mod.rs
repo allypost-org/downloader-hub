@@ -8,8 +8,62 @@ pub mod status;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkRequest {
-    pub request_id: Arc<str>,
     pub info: info::WorkRequestInfo,
+    pub request_id: Arc<str>,
+    pub metadata: HashMap<String, String>,
+    pub status: status::WorkRequestStatus,
+    #[serde(default)]
+    pub errors: Arc<[Arc<str>]>,
+}
+impl WorkRequest {
+    #[must_use]
+    #[inline]
+    pub const fn info(&self) -> &info::WorkRequestInfo {
+        &self.info
+    }
+
+    #[must_use]
+    #[inline]
+    pub fn request_id(&self) -> Arc<str> {
+        self.request_id.clone()
+    }
+
+    #[must_use]
+    #[inline]
+    pub const fn status(&self) -> &status::WorkRequestStatus {
+        &self.status
+    }
+
+    #[must_use]
+    #[inline]
+    pub const fn metadata(&self) -> &HashMap<String, String> {
+        &self.metadata
+    }
+
+    #[must_use]
+    #[inline]
+    pub fn errors(&self) -> &[Arc<str>] {
+        &self.errors
+    }
+
+    #[must_use]
+    pub fn into_parts(self) -> (info::WorkRequestInfo, WorkRequestMeta) {
+        (
+            self.info,
+            WorkRequestMeta {
+                request_id: self.request_id,
+                metadata: self.metadata,
+                status: self.status,
+                errors: self.errors,
+            },
+        )
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkRequestMeta {
+    pub request_id: Arc<str>,
     pub metadata: HashMap<String, String>,
     pub status: status::WorkRequestStatus,
     #[serde(default)]
@@ -41,30 +95,12 @@ impl<'a> TryFrom<&'a app_database::api::requests::RequestInfoResponse> for WorkR
         value: &'a app_database::api::requests::RequestInfoResponse,
     ) -> Result<Self, Self::Error> {
         Ok(Self {
-            request_id: value.request_id.clone(),
             info: value.info.clone().try_into()?,
+            request_id: value.request_id.clone(),
             metadata: value.metadata.clone(),
             status: value.status.clone().try_into()?,
             errors: value.errors.clone(),
         })
-    }
-}
-
-impl From<WorkRequest> for super::super::CentralMessage {
-    fn from(msg: WorkRequest) -> Self {
-        Self::WorkRequest(Box::new(msg))
-    }
-}
-
-impl From<Vec<WorkRequest>> for super::super::CentralMessage {
-    fn from(msg: Vec<WorkRequest>) -> Self {
-        Self::WorkRequests(msg.into())
-    }
-}
-
-impl From<Arc<[WorkRequest]>> for super::super::CentralMessage {
-    fn from(msg: Arc<[WorkRequest]>) -> Self {
-        Self::WorkRequests(msg)
     }
 }
 

@@ -46,12 +46,12 @@ State lives in **Convex** (hosted TS backend). All four binaries share it throug
 
 Four binaries:
 
-- `downloader-central` — axum HTTP server, the coordination point.
+- `downloader-central` — iroh node + coordination point. Serves the irpc control protocol (`app-peer-comms::rpc::CentralProtocol`) over QUIC, publishes pub/sub broadcasts on iroh-gossip, and runs a **minimal** axum HTTP surface (`/api/v1/join-ticket` bootstrap, `/api/v1/metrics`, `/health`).
 - `downloader-worker` — performs downloads/processing.
 - `downloader-bot` — multi-platform (Telegram + Discord + Others) selected via subcommand.
 - `downloader-cli` — local CLI tool.
 
-`central`, `worker`, and `bot` communicate via **iroh** (`app-peer-comms` crate) and share state through Convex. See `mprocs.yaml` for the dev invocations and dev-only `--peer-comms-*` flags.
+`central`, `worker`, and `bot` communicate over **iroh QUIC**: request/response RPC via **`irpc`** (riding the existing `PeeringEndpoint` through the `irpc-iroh` transport; ALPN `app_peer_comms::rpc::RPC_ALPN`), and fan-out broadcasts (available work, frees, failures) via **iroh-gossip**. File transfer uses iroh-blobs. Auth is **API-key-at-connect** (the `Auth` irpc call; validated against Convex `downloader_hub_authed`) — there are no JWTs on the RPC path. See `docs/plans/2026-07-01_14-54_move-control-rpc-to-irpc.md` for the full design and `mprocs.yaml` for dev invocations / dev-only `--peer-comms-*` flags.
 
 ## Env / secrets
 
@@ -66,3 +66,4 @@ Four binaries:
 
 - `watchexec` is the only watcher used; all `dev-watch*` recipes route through the `_watch` helper.
 - Release profile: `lto = "thin"`, `codegen-units = 1`, `strip = true`. The separate `release-cli` profile (`opt-level = "s"`, `panic = "abort"`) is used only by `just install-cli`.
+- DO NOT write ANY unnecessary code comments. Only write them if they are **_absolutely necessary_** to understand the code (in which case it's probably better to re-write it to be more readable) OR if they're doc comments for clap attributes (help text is auto-generated from them).
