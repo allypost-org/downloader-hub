@@ -14,8 +14,10 @@ use crate::message::v1::central::{
 
 pub mod auth_result;
 pub mod request;
+pub mod session;
 
 pub use auth_result::AuthResult;
+pub use session::{AuthedInfo, Role, Session};
 
 pub const RPC_ALPN: &[u8] = b"downloader-hub/rpc/1";
 

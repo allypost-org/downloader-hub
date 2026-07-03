@@ -11,7 +11,9 @@ pub async fn run(
     worker_config: WorkerHttpApiConfig,
     database_config: DatabaseConfig,
 ) -> super::ComponentResult {
-    _ = Database::init(database_config).await;
+    if let Err(e) = Database::init(database_config).await {
+        error!(?e, "Database::init failed");
+    }
 
     debug!(?worker_config, "Starting HTTP API");
 

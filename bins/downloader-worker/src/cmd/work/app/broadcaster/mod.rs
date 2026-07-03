@@ -45,6 +45,13 @@ impl Broadcaster {
         }));
     }
 
+    pub fn send_work_request_refuse(&self, request_id: Arc<str>) {
+        spawn(deliver("work_request_refuse", move || {
+            let id = request_id.clone();
+            async move { RpcClient::refuse_work_item(id).await.map(drop) }
+        }));
+    }
+
     pub fn send_work_request_update_status_message(&self, request_id: Arc<str>, message: &str) {
         let message: Arc<str> = Arc::from(message);
         spawn(deliver("work_request_update_status", move || {
@@ -109,7 +116,9 @@ where
                 warn!(%label, attempt, ?e, "deliver failed; retrying");
             }
         }
-        tokio::time::sleep(*delay).await;
+        #[allow(clippy::cast_possible_truncation)]
+        let jitter = Duration::from_millis(rand::random_range(0..=(delay.as_millis() as u64 / 2)));
+        tokio::time::sleep(*delay + jitter).await;
     }
 
     match f().await {

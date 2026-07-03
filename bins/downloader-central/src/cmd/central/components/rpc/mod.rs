@@ -23,7 +23,7 @@ use app_peer_comms::{
             UpdateStatusMessageResult, UpdateStatusMessageResultStatus,
         },
         work_request::request::WorkRequest,
-        work_request_snapshot::WorkRequestSnapshot,
+        work_request_snapshot::{WorkRequestSnapshot, WorkRequestSnapshotError},
     },
     rpc::{
         AuthResult, CentralProtocol, CentralRequest,
@@ -174,17 +174,17 @@ impl ProtocolHandler for CentralRpcServer {
                         conn.close(1u32.into(), b"unauthenticated");
                         break;
                     };
+                    let permit = match in_flight.clone().acquire_owned().await {
+                        Ok(p) => p,
+                        Err(e) => {
+                            warn!(?e, "in-flight semaphore closed");
+                            break;
+                        }
+                    };
                     let server = self.clone();
                     let conn = conn.clone();
-                    let permit = in_flight.clone();
                     tokio::spawn(async move {
-                        let _permit = match permit.acquire_owned().await {
-                            Ok(p) => p,
-                            Err(e) => {
-                                warn!(?e, "in-flight semaphore closed");
-                                return;
-                            }
-                        };
+                        let _permit = permit;
                         server
                             .dispatch(req, session_id, authed_id, role, conn)
                             .await;
@@ -237,11 +237,17 @@ impl CentralRpcServer {
                     .registry
                     .register(info.id.clone(), conn.clone(), info.expires_at);
                 metrics::auth_ok();
+                let role = info.for_role;
+                let session_info = app_peer_comms::rpc::AuthedInfo {
+                    id: info.id.clone(),
+                    role: (&role).into(),
+                    expires_at: info.expires_at,
+                };
                 AuthOutcome {
-                    result: AuthResult::Ok,
+                    result: AuthResult::Ok(session_info),
                     session_id: Some(id),
                     authed_id: Some(info.id),
-                    role: Some(info.for_role),
+                    role: Some(role),
                 }
             }
             Ok(AuthedInfoResponse::NotAuthorized { error }) => {
@@ -522,6 +528,13 @@ impl CentralRpcServer {
             CentralRequest::WorkRequestGetMineInProgress(r) => {
                 let WithChannels { tx, .. } = r;
                 if !is_bot {
+                    warn!(role = %role, "non-bot requested WorkRequestGetMineInProgress; sending error frame");
+                    let _ = tx
+                        .send(WorkRequestSnapshot {
+                            requests: Arc::from([]),
+                            error: Some(WorkRequestSnapshotError::Unauthorized),
+                        })
+                        .await;
                     return;
                 }
                 spawn_watch_mine_in_progress(tx, authed_id, conn);
@@ -651,6 +664,7 @@ fn spawn_watch_mine_in_progress(
                             }
                             let snapshot = WorkRequestSnapshot {
                                 requests: requests.into(),
+                                error: None,
                             };
                             if tx.send(snapshot).await.is_err() {
                                 return;

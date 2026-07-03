@@ -25,7 +25,12 @@ pub struct AuthedInfo {
     pub for_role: AuthedForRole,
     #[serde(rename = "onlyTagged", default)]
     pub only_tagged: Arc<[String]>,
-    pub expires_at: Option<i64>,
+    #[serde(
+        with = "crate::helpers::serde::bigint::option",
+        default,
+        rename = "expiresAt"
+    )]
+    pub expires_at: Option<u64>,
 }
 impl Database {
     pub async fn authed_get_info_by_token(
@@ -55,7 +60,8 @@ impl Database {
 #[serde(rename_all = "camelCase")]
 pub struct AuthedIdWithExpiry {
     pub id: Arc<str>,
-    pub expires_at: Option<i64>,
+    #[serde(with = "crate::helpers::serde::bigint::option", default)]
+    pub expires_at: Option<u64>,
 }
 
 impl Database {

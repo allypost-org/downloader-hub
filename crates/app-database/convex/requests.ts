@@ -863,3 +863,34 @@ export const finish = mutation({
     } as const;
   },
 });
+
+export const clearRefusals = mutation({
+  args: {
+    requestId: v.id(requestsId),
+  },
+  returns: v.union(
+    v.object({
+      ok: v.literal(false),
+      code: v.literal("RequestNotFound"),
+    }),
+    v.object({
+      ok: v.literal(true),
+      code: v.literal("Ok"),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const row = await ctx.db.get(args.requestId);
+
+    if (!row) {
+      return { ok: false, code: "RequestNotFound" } as const;
+    }
+
+    await ctx.db.patch(args.requestId, {
+      refusedBy: [],
+      tries: 0n,
+      lastModified: BigInt(Date.now()),
+    });
+
+    return { ok: true, code: "Ok" } as const;
+  },
+});

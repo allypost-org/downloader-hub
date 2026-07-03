@@ -35,8 +35,16 @@ impl RpcClient {
             })
             .await?
         {
-            AuthResult::Ok => {}
-            AuthResult::Unauthorized => return Err("irpc authentication rejected".into()),
+            AuthResult::Ok(info) => {
+                tracing::info!(?info, "irpc session established");
+            }
+            AuthResult::Unauthorized => {
+                tracing::error!(
+                    "irpc authentication rejected; the API key is likely revoked or expired. \
+                     Terminating."
+                );
+                std::process::exit(1);
+            }
         }
 
         let client = Arc::new(client);

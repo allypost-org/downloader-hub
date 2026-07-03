@@ -8,7 +8,7 @@ use app_helpers::{futures::task_controller::TaskController, temp_dir::TempDir};
 use app_peer_comms::{
     IrohBlobTicket, PeeringEndpoint,
     message::v1::{
-        central::work_request::{WorkRequest, WorkRequestInfo},
+        central::work_request::{WorkRequest, WorkRequestInfo, request::WorkRequestMeta},
         common::file::FileReference,
     },
 };
@@ -20,11 +20,20 @@ use crate::cmd::work::app::{
 };
 
 pub async fn process_work_request(work_request: WorkRequest) {
-    let span = tracing::span!(tracing::Level::INFO, "do-request", id = %work_request.request_id);
+    let span = tracing::span!(tracing::Level::INFO, "do-request", id = %work_request.request_id());
     let _enter = span.enter();
 
-    let WorkRequestInfo::DownloadAndFix(file_reference) = work_request.info;
-    let request_id = work_request.request_id;
+    let (info, meta) = work_request.into_parts();
+
+    match info {
+        WorkRequestInfo::DownloadAndFix(file_reference) => {
+            process_download_and_fix(meta, file_reference).await;
+        }
+    }
+}
+
+async fn process_download_and_fix(request_meta: WorkRequestMeta, file_reference: FileReference) {
+    let request_id = request_meta.request_id;
 
     let tmp_dir = TempDir::in_tmp(format!("downloader-agent.download-and-fix.{request_id}"));
     let tmp_dir = match tmp_dir {
@@ -151,13 +160,13 @@ async fn download_and_fix(request_id: Arc<str>, file_reference: FileReference, t
                 debug!("No files downloaded");
                 Broadcaster::get().send_work_request_update_status_message(
                     request_id.clone(),
-                    "Got no files from extractor. Sending back to queue.",
+                    "Got no files from extractor. Refusing so it goes to another worker.",
                 );
                 tokio::time::sleep(std::time::Duration::from_millis(
                     1000 + rand::random_range(0..3000),
                 ))
                 .await;
-                Broadcaster::get().send_work_request_free(request_id.clone());
+                Broadcaster::get().send_work_request_refuse(request_id.clone());
                 return;
             }
 

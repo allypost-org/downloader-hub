@@ -259,6 +259,24 @@ impl Database {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "code")]
+pub enum ClearRefusalsResult {
+    RequestNotFound,
+    Ok,
+}
+impl Database {
+    pub async fn requests_clear_refusals(
+        &self,
+        request_id: Arc<str>,
+    ) -> Result<ClearRefusalsResult, DatabaseError> {
+        DatabaseRequest::named("requests:clearRefusals")
+            .with_arg("requestId", request_id.as_ref())
+            .mutate(self)
+            .await
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "code")]
 pub enum UpdateStatusMessageResult {
     RequestNotFound,
     RequestNotInProgress,

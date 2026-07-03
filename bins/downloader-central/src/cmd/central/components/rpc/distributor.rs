@@ -5,8 +5,7 @@ use app_database::{
     api::requests::{RequestInfoResponse, TakeResult as DbTakeResult},
 };
 use app_peer_comms::{
-    irpc::channel::oneshot,
-    message::v1::central::{get_work_item_result::GetWorkItemResult, work_request::WorkRequest},
+    irpc::channel::oneshot, message::v1::central::get_work_item_result::GetWorkItemResult,
 };
 use tokio::sync::mpsc;
 use tracing::{debug, error, trace, warn};
@@ -67,18 +66,15 @@ impl WorkDistributor {
     }
 
     pub async fn disconnect(&self, session_id: u64) {
-        if self
-            .cmd_tx
-            .send(Cmd::Disconnect { session_id })
-            .await
-            .is_err()
-        {}
+        if let Err(e) = self.cmd_tx.send(Cmd::Disconnect { session_id }).await {
+            warn!(?e, "WorkDistributor gone; dropping disconnect");
+        }
     }
 }
 
 async fn run(mut rx: mpsc::Receiver<Cmd>) {
-    let mut waiting: VecDeque<Waiter> = VecDeque::new();
-    let mut available: Vec<RequestInfoResponse> = Vec::new();
+    let mut waiting = VecDeque::new();
+    let mut available = Vec::new();
 
     while let Some(cmd) = rx.recv().await {
         match cmd {
@@ -116,6 +112,19 @@ async fn run(mut rx: mpsc::Receiver<Cmd>) {
             }
         }
     }
+
+    let dropped = waiting.len();
+    for waiter in waiting {
+        warn!(
+            ?waiter.authed_id,
+            "Failing parked waiter on distributor shutdown with BackendError"
+        );
+        let _ = waiter.irpc_tx.send(GetWorkItemResult::BackendError).await;
+    }
+    if dropped > 0 {
+        warn!(dropped, "Failed parked waiters on distributor exit");
+    }
+    metrics::set_parked_workers(0);
     warn!("WorkDistributor task exited");
 }
 
@@ -134,10 +143,11 @@ async fn hand_to(waiter: Waiter, available: &mut Vec<RequestInfoResponse>) -> Op
             .await
         {
             Ok(DbTakeResult::Ok(box_req)) => {
-                let wr: WorkRequest = match box_req.as_ref().try_into() {
+                let wr = match box_req.as_ref().try_into() {
                     Ok(w) => w,
                     Err(e) => {
-                        error!(?e, "work request convert failed; trying next item");
+                        error!(?e, ?req_id, "work request convert failed; releasing item");
+                        let _ = Database::global().requests_release(req_id, authed_id).await;
                         continue;
                     }
                 };

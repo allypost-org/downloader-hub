@@ -14,7 +14,8 @@ pub struct ConnectionInfo {
     pub capabilities: Option<String>,
     #[serde(default)]
     pub version: Option<String>,
-    pub last_seen: i64,
+    #[serde(with = "crate::helpers::serde::bigint")]
+    pub last_seen: u64,
 }
 
 impl Database {

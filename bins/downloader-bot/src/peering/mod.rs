@@ -123,32 +123,5 @@ async fn get_ticket(
 async fn fetch_ticket_from_api(
     api: PeerCommsBotTicketFromApiConfig,
 ) -> Result<Ticket, Box<dyn std::error::Error + Send + Sync>> {
-    #[derive(Debug, serde::Deserialize)]
-    struct TicketResp {
-        data: TicketRespData,
-    }
-    #[derive(Debug, serde::Deserialize)]
-    struct TicketRespData {
-        ticket: String,
-    }
-
-    let url = api.url.join("/api/v1/join-ticket")?;
-
-    trace!(target: PeeringEndpoint::trace_span_name(), %url, "Fetching ticket from API");
-
-    let res = app_requests::Client::builder()
-        .build()?
-        .get(url)
-        .header("Authorization", format!("Bearer {}", api.key))
-        .send()
-        .await?
-        .error_for_status()?
-        .json::<TicketResp>()
-        .await?;
-
-    let data = res.data;
-
-    trace!(target: PeeringEndpoint::trace_span_name(), ?data, "Parsing ticket from API");
-
-    Ok(TargetedTicket::from_str(&data.ticket, TicketTarget::Bot).map(Into::into)?)
+    Ok(app_peer_comms::ticket::fetch_join_ticket(&api.url, &api.key, TicketTarget::Bot).await?)
 }

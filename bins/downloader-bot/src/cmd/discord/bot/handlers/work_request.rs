@@ -48,7 +48,7 @@ pub async fn watch_work_requests() -> Result<(), anyhow::Error> {
     } {
         for req in snapshot.requests.iter().cloned() {
             let req = Arc::new(req);
-            let status_message = match StatusMessage::from_metadata(&req.metadata) {
+            let status_message = match StatusMessage::from_metadata(req.metadata()) {
                 Ok(x) => x,
                 Err(e) => {
                     error!(?e, "Failed to get status message");
@@ -63,17 +63,17 @@ pub async fn watch_work_requests() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-#[tracing::instrument(name = "discord-work-request", skip_all, fields(request_id = ?work_request.request_id))]
+#[tracing::instrument(name = "discord-work-request", skip_all, fields(request_id = ?work_request.request_id()))]
 #[allow(clippy::too_many_lines)]
 pub async fn process_work_request(
     work_request: Arc<WorkRequest>,
     mut status_message: StatusMessage,
 ) {
-    let request_id = work_request.request_id.clone();
+    let request_id = work_request.request_id();
 
     debug!(request = ?work_request, "Start processing work request");
 
-    let status = &work_request.status;
+    let status = work_request.status();
 
     if status.is_pending() {
         trace!("Work request is pending");
@@ -255,7 +255,7 @@ pub async fn process_work_request(
         for (_path, err) in failed_files {
             errs.push(format!("Failed to upload file: {}", err));
         }
-        for err in work_request.errors.iter() {
+        for err in work_request.errors() {
             errs.push(err.to_string());
         }
 

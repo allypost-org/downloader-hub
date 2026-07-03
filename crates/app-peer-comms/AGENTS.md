@@ -16,6 +16,7 @@ iroh wrapper + the irpc control protocol. Provides the `PeeringEndpoint` singlet
 - Direct peer connections are cached in a `moka` future cache (TTI 2 min, cap 30). Don't bypass it with ad-hoc `connect()` calls.
 - Expiring blob tags are prefixed `__expiring-<rfc3339>`; `downloader-worker` periodically GCs them via `delete_expired_tags`.
 - Gossip payloads are raw postcard via `PeeringEndpoint::broadcast_raw` / `decode_raw` (no envelope — iroh-gossip authenticates the sender by node id).
+- **irpc wire types are postcard, not JSON.** Any type that crosses the irpc/postcard boundary (everything in `src/rpc/` and `src/message/v1/`, plus gossip payloads) is serialized **positionally** — there are no field tags or names. JSON-oriented serde attributes (`rename_all`, `rename`) are harmless because postcard ignores names, but **never** use `skip_serializing_if`, `skip`, `skip_serializing`, or any attribute that changes the *number* of serialized fields: a struct whose `Option` field is omitted on encode will decode with `Hit the end of buffer, expected more data` on the other side (and `#[serde(default)]` does not rescue this — that only helps self-describing formats). Keep wire structs fully positional; always serialize every field.
 
 ## Builder
 

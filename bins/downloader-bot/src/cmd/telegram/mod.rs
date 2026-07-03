@@ -63,7 +63,7 @@ async fn watch_work_requests() -> Result<(), anyhow::Error> {
         for req in snapshot.requests.iter().cloned() {
             let req = Arc::new(req);
             let status_message =
-                match bot::helpers::status_message::StatusMessage::from_metadata(&req.metadata) {
+                match bot::helpers::status_message::StatusMessage::from_metadata(req.metadata()) {
                     Ok(x) => x,
                     Err(e) => {
                         error!(?e, "Failed to get status message");

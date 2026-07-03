@@ -17,7 +17,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     .iter()
                     .map(|entry| (entry.id.clone(), entry.expires_at))
                     .collect();
-                let now_ms = chrono::Utc::now().timestamp_millis();
+                let now_ms = u64::try_from(chrono::Utc::now().timestamp_millis()).unwrap_or(0);
                 let closed = registry.revoke_invalid(&valid, now_ms);
                 if closed > 0 {
                     warn!(closed, "Closed revoked/expired irpc sessions");

@@ -78,8 +78,11 @@ pub async fn run(
                 return Err("central backend error".into());
             }
             Ok(GetWorkItemResult::Unauthorized) => {
-                error!("this worker is not authorized to receive work items");
-                return Err("unauthorized for getWorkItem".into());
+                error!(
+                    "this worker is not authorized to receive work items; \
+                     the API key is likely revoked or expired. Terminating."
+                );
+                std::process::exit(1);
             }
             Err(e) => {
                 error!(?e, "getWorkItem failed");
@@ -88,13 +91,12 @@ pub async fn run(
         };
 
         if can_process(&work_request).await {
-            debug!(id = %work_request.request_id, "Processing work item");
+            debug!(id = %work_request.request_id(), "Processing work item");
             process::process_work_request(work_request).await;
         } else {
-            debug!(id = %work_request.request_id, "Cannot process work item; refusing");
+            debug!(id = %work_request.request_id(), "Cannot process work item; refusing");
             if let Err(e) =
-                crate::cmd::work::rpc::RpcClient::refuse_work_item(work_request.request_id.clone())
-                    .await
+                crate::cmd::work::rpc::RpcClient::refuse_work_item(work_request.request_id()).await
             {
                 error!(?e, "refuse_work_item failed");
             }
@@ -103,7 +105,14 @@ pub async fn run(
 }
 
 async fn can_process(work_request: &WorkRequest) -> bool {
-    let WorkRequestInfo::DownloadAndFix(file_reference) = &work_request.info;
+    match &work_request.info {
+        WorkRequestInfo::DownloadAndFix(file_reference) => {
+            can_process_download_and_fix(file_reference).await
+        }
+    }
+}
+
+async fn can_process_download_and_fix(file_reference: &FileReference) -> bool {
     match file_reference {
         FileReference::BlobTicket(_) => true,
         FileReference::Url(url) => {
@@ -112,9 +121,7 @@ async fn can_process(work_request: &WorkRequest) -> bool {
             else {
                 return false;
             };
-            req.first_available_extractor()
-                .await
-                .is_some_and(|extractor| extractor.is_enabled())
+            req.first_available_extractor().await.is_some()
         }
     }
 }

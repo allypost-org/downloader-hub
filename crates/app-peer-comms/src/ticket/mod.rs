@@ -3,6 +3,7 @@ use std::{fmt, str::FromStr, sync::Arc};
 use iroh::EndpointAddr;
 use iroh_gossip::proto::TopicId;
 use serde::{Deserialize, Serialize};
+use tracing::trace;
 use url::Url;
 
 pub mod targeted;
@@ -73,4 +74,50 @@ pub enum TicketError {
 
     #[error("Failed to decode data from ticket: {0}")]
     PostcardDecode(postcard::Error),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum FetchJoinTicketError {
+    #[error(transparent)]
+    Http(#[from] app_requests::reqwest::Error),
+
+    #[error(transparent)]
+    Url(#[from] url::ParseError),
+
+    #[error(transparent)]
+    Ticket(#[from] targeted::TargetedTicketError),
+}
+
+pub async fn fetch_join_ticket(
+    api_url: &Url,
+    api_key: &str,
+    target: targeted::TicketTarget,
+) -> Result<Ticket, FetchJoinTicketError> {
+    #[derive(Debug, serde::Deserialize)]
+    struct TicketResp {
+        data: TicketRespData,
+    }
+    #[derive(Debug, serde::Deserialize)]
+    struct TicketRespData {
+        ticket: String,
+    }
+
+    let url = api_url.join("/api/v1/join-ticket")?;
+
+    trace!(target: crate::PeeringEndpoint::trace_span_name(), %url, "Fetching ticket from API");
+
+    let data = app_requests::Client::builder()
+        .build()?
+        .get(url)
+        .header("Authorization", format!("Bearer {api_key}"))
+        .send()
+        .await?
+        .error_for_status()?
+        .json::<TicketResp>()
+        .await?
+        .data;
+
+    trace!(target: crate::PeeringEndpoint::trace_span_name(), ?data, "Parsing ticket from API");
+
+    Ok(targeted::TargetedTicket::from_str(&data.ticket, target).map(Into::into)?)
 }

@@ -17,3 +17,24 @@ where
 {
     serializer.serialize_str(&value.to_string())
 }
+
+pub mod option {
+    use serde::{Deserializer, Serializer};
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(Some(super::deserialize(deserializer)?))
+    }
+
+    pub fn serialize<S>(value: &Option<u64>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match value {
+            Some(v) => super::serialize(v, serializer),
+            None => serializer.serialize_none(),
+        }
+    }
+}

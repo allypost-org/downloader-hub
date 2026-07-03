@@ -119,7 +119,7 @@ pub async fn handle_message(msg: &TelegramMessage) -> ResponseResult<()> {
     Ok(())
 }
 
-#[tracing::instrument(name="process-work-request", skip_all, fields(request_id = ?work_request.request_id))]
+#[tracing::instrument(name="process-work-request", skip_all, fields(request_id = ?work_request.request_id()))]
 #[allow(clippy::too_many_lines)]
 pub async fn process_work_request(
     work_request: Arc<WorkRequest>,
@@ -128,11 +128,11 @@ pub async fn process_work_request(
     static WORK_REQUESTS_PROCESSING_LOCKS: LazyLock<Arc<Mutex<WorkRequestLockMap>>> =
         LazyLock::new(|| Arc::new(Mutex::new(WorkRequestLockMap::new())));
 
-    let request_id = work_request.request_id.clone();
+    let request_id = work_request.request_id();
 
     debug!(request = ?work_request, "Start processing work request");
 
-    let status = &work_request.status;
+    let status = &work_request.status();
 
     if status.is_pending() {
         trace!("Work request is pending");
@@ -303,7 +303,7 @@ pub async fn process_work_request(
             for (_path, err) in failed_files {
                 errs.push(format!("Failed to upload file: {}", err));
             }
-            for err in work_request.errors.iter() {
+            for err in work_request.errors() {
                 errs.push(err.to_string());
             }
             errs

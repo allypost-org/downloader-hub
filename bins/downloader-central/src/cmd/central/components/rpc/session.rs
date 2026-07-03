@@ -28,11 +28,11 @@ struct RegistryInner {
 struct Session {
     authed_id: Arc<str>,
     conn: Connection,
-    expires_at: Option<i64>,
+    expires_at: Option<u64>,
 }
 
 impl SessionRegistry {
-    pub fn register(&self, authed_id: Arc<str>, conn: Connection, expires_at: Option<i64>) -> u64 {
+    pub fn register(&self, authed_id: Arc<str>, conn: Connection, expires_at: Option<u64>) -> u64 {
         let id = {
             let mut inner = self.inner.lock().expect("session registry poisoned");
             let id = inner.next_id;
@@ -61,7 +61,7 @@ impl SessionRegistry {
     }
 
     #[allow(clippy::needless_collect, clippy::significant_drop_tightening)]
-    pub fn revoke_invalid(&self, valid: &HashMap<Arc<str>, Option<i64>>, now_ms: i64) -> usize {
+    pub fn revoke_invalid(&self, valid: &HashMap<Arc<str>, Option<u64>>, now_ms: u64) -> usize {
         let closed = {
             let mut inner = self.inner.lock().expect("session registry poisoned");
             let invalid: Vec<u64> = inner
