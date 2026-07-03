@@ -1,0 +1,74 @@
+name: Verify version bump
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch main
+        run: git fetch origin main
+      - name: Check for version-relevant changes
+        id: changes
+        run: |
+          set -euo pipefail
+          changed=$(git diff --name-only origin/main...HEAD -- Cargo.toml bins crates)
+          if [ -z "$changed" ]; then
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "No version-relevant changes (Cargo.toml/bins/crates); skipping version check."
+          else
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "Version-relevant changes detected:"
+            echo "$changed"
+          fi
+      - name: Verify PR version is greater than main
+        if: steps.changes.outputs.relevant == 'true'
+        run: |
+          python3 - <<'PY'
+          import subprocess, sys, tomllib
+
+          def workspace_version(blob):
+              data = tomllib.loads(blob)
+              return data["workspace"]["package"]["version"]
+
+          def version_key(v):
+              v = v.split("+", 1)[0]
+              pre = ""
+              if "-" in v:
+                  v, pre = v.split("-", 1)
+              nums = [int(x) for x in v.split(".")]
+              while len(nums) < 3:
+                  nums.append(0)
+              # a pre-release ranks below the same version without one
+              return (tuple(nums), 1 if pre == "" else 0)
+
+          with open("Cargo.toml", "rb") as f:
+              pr_version = workspace_version(f.read().decode())
+
+          main_blob = subprocess.run(
+              ["git", "show", "origin/main:Cargo.toml"],
+              check=True,
+              capture_output=True,
+          ).stdout.decode()
+          main_version = workspace_version(main_blob)
+
+          print(f"PR version:   {pr_version}")
+          print(f"main version: {main_version}")
+
+          if version_key(pr_version) <= version_key(main_version):
+              print(
+                  f"::error::PR version {pr_version} is not greater than main "
+                  f"{main_version}. Bump `version` under `[workspace.package]` "
+                  "in the root Cargo.toml."
+              )
+              sys.exit(1)
+
+          print("OK: PR version is greater than main.")
+          PY
