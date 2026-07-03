@@ -116,6 +116,12 @@ pub enum BotCommand {
     About,
     #[command(description = "Responds with 'Pong!'")]
     Ping,
+    #[command(description = "List the available extractors (URL handlers).")]
+    ListExtractors,
+    #[command(description = "List the available downloaders.")]
+    ListDownloaders,
+    #[command(description = "List the available fixers (post-processors).")]
+    ListFixers,
 }
 
 #[tracing::instrument(name = "message", skip(_bot, msg), fields(chat = %msg.chat.id, msg_id = %msg.id, with = field::Empty))]

@@ -5,15 +5,17 @@ use std::{
 
 use app_config::common::{DEFAULT_TOPIC_ID, PeerCommsCentralConfig};
 use app_helpers::futures::retry_future::{RetryConfig, keep_running};
-use app_peer_comms::{PeeringEndpoint, TopicId};
+use app_peer_comms::{PeeringEndpoint, TopicId, rpc::RPC_ALPN};
 use tokio::task::JoinSet;
-use tracing::{debug, trace};
+use tracing::debug;
 
 use super::config::CentralConfig;
+use crate::cmd::central::components::rpc::CentralRpcServer;
 
-pub mod _ipc;
 pub mod database;
+pub mod metrics;
 pub mod peers;
+pub mod rpc;
 pub mod worker_api;
 
 pub async fn spawn(
@@ -21,9 +23,12 @@ pub async fn spawn(
 ) -> Result<JoinSet<(&'static str, ComponentResult)>, Box<dyn std::error::Error + Send + Sync>> {
     let mut js = JoinSet::new();
 
-    _ipc::init();
+    rpc::init_sessions();
+    rpc::init_distributor();
 
     init_peering(config.peer).await?;
+
+    rpc::init_central_id(PeeringEndpoint::global().endpoint_id().await.to_string());
 
     js.spawn(keep_running(
         "Database",
@@ -52,15 +57,6 @@ pub async fn spawn(
                 .with_retry_delays(RETRY_DELAYS.clone())
                 .with_reset_retries_after(Some(FIVE_MINS)),
         )
-    });
-
-    js.spawn(async move {
-        let mut reciever = super::broadcaster::Broadcaster::recv_from_now();
-        while let Ok(msg) = reciever.recv().await {
-            trace!(?msg, "Got broadcast from broadcaster");
-        }
-
-        ("Broadcaster receiver", Ok(()))
     });
 
     Ok(js)
@@ -103,6 +99,7 @@ async fn init_peering(
     );
 
     let pe = PeeringEndpoint::builder(config.common, topic_id)
+        .with_router_hook(|b| b.accept(RPC_ALPN, CentralRpcServer::new()))
         .build()
         .await?;
 

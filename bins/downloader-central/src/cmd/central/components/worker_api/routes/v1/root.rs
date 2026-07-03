@@ -1,178 +1,97 @@
-use std::net::SocketAddr;
-
 use app_database::{Database, api::authed::AuthedInfoResponse, entity::authed::AuthedForRole};
 use app_peer_comms::{
-    PeeringEndpoint, jwt,
+    PeeringEndpoint,
     ticket::targeted::{TargetedTicket, TicketTarget},
 };
 use axum::{
-    extract::{ConnectInfo, Path, WebSocketUpgrade, ws::WebSocket},
-    http::HeaderMap,
+    http::{HeaderMap, StatusCode, header::CONTENT_TYPE},
     response::IntoResponse,
 };
-use tracing::{debug, error, trace};
+use tracing::error;
 
-use crate::cmd::central::components::worker_api::{
-    auth::ValidAuth, event_handler, global::GlobalData, request::negotiated::Negotiated,
-};
+use crate::cmd::central::components::metrics;
 
 pub async fn get_join_ticket(headers: HeaderMap) -> impl IntoResponse {
-    let pe = PeeringEndpoint::global();
-
-    let Some(auth_header) = headers.get("Authorization").and_then(|v| v.to_str().ok()) else {
+    let Some(info) = require_authed(&headers).await else {
         return super::V1Response::err(
-            http::StatusCode::UNAUTHORIZED,
-            "Missing Authorization header",
-        );
-    };
-    let Some((auth_type, token)) = auth_header.split_once(' ') else {
-        return super::V1Response::err(
-            http::StatusCode::UNAUTHORIZED,
-            "Invalid Authorization header: must be `Bearer <token>`",
+            StatusCode::UNAUTHORIZED,
+            "Missing or invalid `Authorization: Bearer <api_key>` header",
         );
     };
 
-    if auth_type.to_lowercase() != "bearer" {
-        return super::V1Response::err(
-            http::StatusCode::UNAUTHORIZED,
-            "Invalid Authorization header: must be `Bearer <token>`",
-        );
-    }
-
-    let token = token.trim();
-
-    let res = match Database::global()
-        .authed_get_info_by_token(token.into())
-        .await
-    {
-        Ok(info) => info,
-        Err(e) => {
-            error!(?e, "Failed to get authed info");
-            return super::V1Response::err(
-                http::StatusCode::INTERNAL_SERVER_ERROR,
-                "Something went wrong while checking token",
-            );
-        }
-    };
-
-    let info = match res {
+    let info = match info {
         AuthedInfoResponse::NotAuthorized { error } => {
-            return super::V1Response::err(http::StatusCode::UNAUTHORIZED, error);
+            return super::V1Response::err(StatusCode::UNAUTHORIZED, error);
         }
         AuthedInfoResponse::Authorized(info) => info,
     };
 
-    let jwts = jwt::targeted::TargetedJwtPair::generate(
-        &jwt::targeted::TargetedJwtConfig::new(info.id.clone(), info.for_role.to_string().into())
-            .with_expires_at(
-                info.expires_at
-                    .and_then(chrono::DateTime::<chrono::Utc>::from_timestamp_micros),
-            ),
-        GlobalData::jwt_secret().as_bytes(),
-    );
-
-    let jwts = match jwts {
-        Ok(x) => x,
-        Err(e) => {
-            error!(?e, "Failed to generate JWTs");
-            return super::V1Response::err(
-                http::StatusCode::INTERNAL_SERVER_ERROR,
-                "Something went wrong while generating JWTs",
-            );
-        }
+    let pe = PeeringEndpoint::global();
+    let ticket = TargetedTicket::new(pe.join_ticket().await);
+    let target = match info.for_role {
+        AuthedForRole::Worker => TicketTarget::Worker,
+        AuthedForRole::Bot => TicketTarget::Bot,
     };
 
-    let ticket = TargetedTicket::new(pe.join_ticket().await);
-
     super::V1Response::ok(serde_json::json!({
-        "jwt_token": jwts.token(),
-        "refresh_token": jwts.refresh_token(),
-        "ticket": ticket.to_string(match info.for_role {
-            AuthedForRole::Worker => TicketTarget::Worker,
-            AuthedForRole::Bot => TicketTarget::Bot,
-        }),
+        "ticket": ticket.to_string(target),
     }))
+}
+
+pub async fn get_connections(headers: HeaderMap) -> impl IntoResponse {
+    if require_authed(&headers).await.is_none() {
+        return super::V1Response::err(
+            StatusCode::UNAUTHORIZED,
+            "Missing or invalid `Authorization: Bearer <api_key>` header",
+        );
+    }
+
+    match Database::global().connections_list().await {
+        Ok(rows) => super::V1Response::ok(serde_json::json!({
+            "connections": rows,
+        })),
+        Err(e) => {
+            error!(?e, "Failed to list connections");
+            super::V1Response::err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Something went wrong while listing connections",
+            )
+        }
+    }
 }
 
 pub async fn get_metrics() -> impl IntoResponse {
-    let pe = PeeringEndpoint::global();
-
-    let endpoint = pe.router.endpoint().metrics();
-    // let gossip = pe.gossip.metrics();
-
-    super::V1Response::ok(serde_json::json!({
-        "endpoint": endpoint,
-        // "gossip": gossip,
-    }))
+    let body = metrics::render();
+    (
+        StatusCode::OK,
+        [(CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
+        body,
+    )
 }
 
-pub async fn any_ws(
-    auth: ValidAuth,
-    ws: WebSocketUpgrade,
-    headers: HeaderMap,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-) -> impl IntoResponse {
-    let Some(negotiated) = Negotiated::negotiate(&headers) else {
-        return super::V1Response::<()>::err(
-            http::StatusCode::NOT_ACCEPTABLE,
-            "No acceptable content type",
-        )
-        .into_response();
-    };
-
-    ws.on_upgrade(move |socket| handle_socket(socket, auth, addr, negotiated))
-        .into_response()
+pub async fn get_health() -> impl IntoResponse {
+    StatusCode::OK
 }
 
-async fn handle_socket(
-    mut socket: WebSocket,
-    auth: ValidAuth,
-    who: SocketAddr,
-    negotiated: Negotiated,
-) {
-    debug!(?auth, ?who, "Websocket connection opened");
-
-    if socket
-        .send(axum::extract::ws::Message::Ping(
-            axum::body::Bytes::from_static(&[1, 2, 3]),
-        ))
+async fn require_authed(headers: &HeaderMap) -> Option<AuthedInfoResponse> {
+    let token = extract_bearer(headers)?;
+    match Database::global()
+        .authed_get_info_by_token(token.into())
         .await
-        .is_ok()
     {
-        trace!(?who, "Pinged");
-    } else {
-        trace!(?who, "Could not send ping");
-        // no Error here since the only thing we can do is to close the connection.
-        // If we can not send messages, there is no way to salvage the statemachine anyway.
-        return;
+        Ok(info) => Some(info),
+        Err(e) => {
+            error!(?e, "Failed to get authed info");
+            None
+        }
     }
-
-    event_handler::handle_socket(socket, auth, who, negotiated).await;
 }
 
-pub async fn get_work_request_watch(
-    auth: ValidAuth,
-    ws: WebSocketUpgrade,
-    Path(request_id): Path<String>,
-) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| {
-        let auth = auth;
-        async move {
-            debug!(?auth, "Websocket connection opened");
-            event_handler::handle_work_request_watch(socket, auth, request_id).await;
-        }
-    })
-}
-
-pub async fn get_work_requests_watch_mine(
-    auth: ValidAuth,
-    ws: WebSocketUpgrade,
-) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| {
-        let auth = auth;
-        async move {
-            debug!(?auth, "Websocket connection opened");
-            event_handler::handle_work_requests_watch_mine_in_progress(socket, auth).await;
-        }
-    })
+fn extract_bearer(headers: &HeaderMap) -> Option<&str> {
+    let header = headers.get("Authorization")?.to_str().ok()?;
+    let (auth_type, token) = header.split_once(' ')?;
+    if !auth_type.eq_ignore_ascii_case("bearer") {
+        return None;
+    }
+    Some(token.trim())
 }

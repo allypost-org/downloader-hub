@@ -3,7 +3,7 @@ use std::time::Duration;
 use axum::{
     Router,
     http::{HeaderValue, Request, Response, header},
-    routing::post,
+    routing::get,
 };
 use axum_client_ip::ClientIpSource;
 use http::StatusCode;
@@ -17,7 +17,6 @@ use tower_http::{
 };
 use tracing::{Span, debug, field, info};
 
-mod rpc;
 mod v1;
 
 pub struct RouterConfig {
@@ -28,7 +27,7 @@ pub fn create_router(conf: &RouterConfig) -> Router {
     add_middlewares(
         conf,
         Router::new()
-            .route("/api/rpc", post(rpc::post_rpc))
+            .route("/health", get(v1::root::get_health))
             .nest("/api/v1", v1::create_v1_router()),
     )
 }
@@ -53,9 +52,8 @@ where
                             .and_then(|id| id.header_value().to_str().ok())
                             .unwrap_or("-");
                         let dur = field::Empty;
-                        let user = field::Empty;
 
-                        tracing::info_span!("", %id, %m, ?p, dur, user)
+                        tracing::info_span!("", %id, %m, ?p, dur)
                     })
                     .on_request(|request: &Request<_>, _span: &Span| {
                         let headers = request.headers();
@@ -84,18 +82,11 @@ where
                     .on_body_chunk(())
                     .on_eos(|_trailers: Option<&_>, stream_duration, span: &Span| {
                         span.record("dur", field::debug(stream_duration));
-                        debug!(
-                            target: "request",
-                            "ERR: stream closed unexpectedly",
-                        );
+                        debug!(target: "request", "ERR: stream closed unexpectedly");
                     })
                     .on_failure(|error, latency, span: &Span| {
                         span.record("dur", field::debug(latency));
-                        debug!(
-                            target: "request",
-                            err = ?error,
-                            "ERR: something went wrong",
-                        );
+                        debug!(target: "request", err = ?error, "ERR: something went wrong");
                     }),
             )
             .layer(TimeoutLayer::with_status_code(

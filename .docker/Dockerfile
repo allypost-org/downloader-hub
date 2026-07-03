@@ -22,7 +22,7 @@ ARG RUST_TARGET='x86_64-unknown-linux-musl'
 ARG DNS_SERVERS='9.9.9.9,8.8.8.8,1.1.1.1'
 
 ARG UPX_VERSION='5.2.0'
-ARG YT_DLP_VERSION='2026.06.09'
+ARG YT_DLP_VERSION='latest'
 
 ARG FFMPEG_DOWNLOAD_URL='https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz'
 

@@ -37,30 +37,6 @@ impl
     }
 }
 
-impl From<MoveToWaitingForRequesterResult> for super::CentralMessage {
-    fn from(value: MoveToWaitingForRequesterResult) -> Self {
-        Self::WorkRequestMoveToWaitingForRequesterResult(value)
-    }
-}
-
-impl
-    From<(
-        RequestId,
-        app_database::api::requests::MoveToWaitingForRequesterResult,
-    )> for super::CentralMessage
-{
-    fn from(
-        value: (
-            RequestId,
-            app_database::api::requests::MoveToWaitingForRequesterResult,
-        ),
-    ) -> Self {
-        let value: MoveToWaitingForRequesterResult = value.into();
-
-        value.into()
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum MoveToWaitingForRequesterResultStatus {
@@ -68,6 +44,8 @@ pub enum MoveToWaitingForRequesterResultStatus {
     RequestNotInProgress,
     RequestNotTakenByYou,
     Ok,
+    BackendError,
+    Unauthorized,
 }
 
 impl From<app_database::api::requests::MoveToWaitingForRequesterResult>

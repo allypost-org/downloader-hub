@@ -74,14 +74,9 @@ impl ExtractedInfo {
         let downloader = downloader.map(Arc::new);
 
         for x in &mut self.urls {
-            #[allow(clippy::option_if_let_else)]
-            {
-                x.preferred_downloader = if let Some(downloader) = downloader.clone() {
-                    Some(downloader)
-                } else {
-                    None
-                }
-            }
+            x.preferred_downloader = downloader
+                .clone()
+                .map(|x| x as Arc<dyn Downloader + 'static>);
         }
 
         self

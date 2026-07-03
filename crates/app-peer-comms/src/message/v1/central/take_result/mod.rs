@@ -84,6 +84,8 @@ pub enum FreeResult {
     RequestNotInProgress { request_id: RequestId },
     RequestNotTakenByYou { request_id: RequestId },
     Ok { request_id: RequestId },
+    BackendError { request_id: RequestId },
+    Unauthorized { request_id: RequestId },
 }
 
 impl FreeResult {
@@ -93,7 +95,9 @@ impl FreeResult {
             Self::RequestNotFound { request_id }
             | Self::RequestNotInProgress { request_id }
             | Self::RequestNotTakenByYou { request_id }
-            | Self::Ok { request_id } => request_id,
+            | Self::Ok { request_id }
+            | Self::BackendError { request_id }
+            | Self::Unauthorized { request_id } => request_id,
         }
     }
 }
@@ -111,6 +115,23 @@ impl From<(RequestId, app_database::api::requests::FreeResult)> for FreeResult {
                 Self::RequestNotTakenByYou { request_id }
             }
             app_database::api::requests::FreeResult::Ok => Self::Ok { request_id },
+        }
+    }
+}
+
+impl From<(RequestId, app_database::api::requests::RefuseResult)> for FreeResult {
+    fn from((request_id, value): (RequestId, app_database::api::requests::RefuseResult)) -> Self {
+        match value {
+            app_database::api::requests::RefuseResult::RequestNotFound => {
+                Self::RequestNotFound { request_id }
+            }
+            app_database::api::requests::RefuseResult::RequestNotInProgress => {
+                Self::RequestNotInProgress { request_id }
+            }
+            app_database::api::requests::RefuseResult::RequestNotTakenByYou => {
+                Self::RequestNotTakenByYou { request_id }
+            }
+            app_database::api::requests::RefuseResult::Ok => Self::Ok { request_id },
         }
     }
 }

@@ -1,70 +1,69 @@
-use std::sync::{Arc, OnceLock};
+use std::{
+    future::Future,
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
-use app_peer_comms::message::v1::{common::file::FileReference, worker::WorkerMessage};
-use tokio::sync::broadcast;
-use tracing::trace;
+use app_peer_comms::{irpc, message::v1::common::file::FileReference};
+use tokio::spawn;
+use tracing::{debug, error, warn};
+
+use crate::cmd::work::rpc::RpcClient;
+
+const RETRY_DELAYS: &[Duration] = &[
+    Duration::from_millis(200),
+    Duration::from_millis(500),
+    Duration::from_secs(1),
+    Duration::from_secs(2),
+    Duration::from_secs(5),
+    Duration::from_secs(10),
+    Duration::from_secs(20),
+    Duration::from_secs(30),
+];
+
+pub struct Broadcaster;
 
 static BROADCASTER: OnceLock<Broadcaster> = OnceLock::new();
 
-type Broadcast = Arc<WorkerMessage>;
-
-pub struct Broadcaster {
-    send: broadcast::Sender<Broadcast>,
-}
-
 impl Broadcaster {
-    pub fn init() -> Result<(), &'static str> {
-        let (send, _) = broadcast::channel::<Broadcast>(60);
-        BROADCASTER
-            .set(Self { send })
-            .map_err(|_| "Failed to init broadcaster")
+    pub fn init() {
+        _ = BROADCASTER.set(Self);
     }
 
+    #[must_use]
     pub fn get() -> &'static Self {
         BROADCASTER.get().expect("Broadcaster not initialized")
     }
-
-    pub fn send<T>(&self, msg: T)
-    where
-        T: Into<Broadcast>,
-    {
-        _ = self.try_send(msg);
-    }
-
-    pub fn try_send<T>(&self, msg: T) -> Result<usize, broadcast::error::SendError<Broadcast>>
-    where
-        T: Into<Broadcast>,
-    {
-        let msg = msg.into();
-
-        trace!(?msg, "Broadcasting message");
-
-        self.send.send(msg)
-    }
-
-    pub fn recv(&self) -> broadcast::Receiver<Broadcast> {
-        self.send.subscribe()
-    }
 }
 
+#[allow(clippy::unused_self)]
 impl Broadcaster {
-    pub fn send_work_request_take(&self, request_id: Arc<str>) {
-        self.send(WorkerMessage::WorkRequestTake { request_id });
-    }
-
     pub fn send_work_request_free(&self, request_id: Arc<str>) {
-        self.send(WorkerMessage::WorkRequestFree { request_id });
+        spawn(deliver("work_request_free", move || {
+            let id = request_id.clone();
+            async move { RpcClient::work_request_free(id).await.map(drop) }
+        }));
     }
 
     pub fn send_work_request_update_status_message(&self, request_id: Arc<str>, message: &str) {
-        self.send(WorkerMessage::WorkRequestUpdateStatusMessage {
-            request_id,
-            message: Arc::from(message),
-        });
+        let message: Arc<str> = Arc::from(message);
+        spawn(deliver("work_request_update_status", move || {
+            let id = request_id.clone();
+            let msg = message.clone();
+            async move {
+                RpcClient::work_request_update_status_message(id, msg)
+                    .await
+                    .map(drop)
+            }
+        }));
     }
 
     pub fn send_work_request_add_errors(&self, request_id: Arc<str>, errors: Vec<String>) {
-        self.send(WorkerMessage::WorkRequestAddErrors { request_id, errors });
+        spawn(deliver("work_request_add_errors", move || {
+            let id = request_id.clone();
+            let errs = errors.clone();
+            async move { RpcClient::work_request_add_errors(id, errs).await.map(drop) }
+        }));
     }
 
     pub fn send_work_request_move_to_waiting_for_requester(
@@ -72,16 +71,58 @@ impl Broadcaster {
         request_id: Arc<str>,
         files_data: Vec<FileReference>,
     ) {
-        self.send(WorkerMessage::WorkRequestMoveToWaitingForRequester {
-            request_id,
-            files_data,
-        });
+        spawn(deliver("work_request_move_to_waiting", move || {
+            let id = request_id.clone();
+            let files = files_data.clone();
+            async move {
+                RpcClient::work_request_move_to_waiting_for_requester(id, files)
+                    .await
+                    .map(drop)
+            }
+        }));
     }
 
     pub fn send_work_request_fail(&self, request_id: Arc<str>, reason: &str) {
-        self.send(WorkerMessage::WorkRequestFail {
-            request_id,
-            reason: Arc::from(reason),
-        });
+        let reason: Arc<str> = Arc::from(reason);
+        spawn(deliver("work_request_fail", move || {
+            let id = request_id.clone();
+            let r = reason.clone();
+            async move { RpcClient::work_request_fail(id, r).await.map(drop) }
+        }));
+    }
+}
+
+async fn deliver<F, Fut>(label: &'static str, f: F)
+where
+    F: Fn() -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<(), irpc::Error>> + Send + 'static,
+{
+    for (attempt, delay) in RETRY_DELAYS.iter().enumerate() {
+        match f().await {
+            Ok(()) => {
+                if attempt > 0 {
+                    debug!(%label, attempt, "delivered after retry");
+                }
+                return;
+            }
+            Err(e) => {
+                warn!(%label, attempt, ?e, "deliver failed; retrying");
+            }
+        }
+        tokio::time::sleep(*delay).await;
+    }
+
+    match f().await {
+        Ok(()) => {
+            debug!(%label, "delivered after final attempt");
+        }
+        Err(e) => {
+            error!(
+                %label,
+                ?e,
+                attempts = RETRY_DELAYS.len() + 1,
+                "permanently failed to deliver result; central will rely on takeCleanup"
+            );
+        }
     }
 }

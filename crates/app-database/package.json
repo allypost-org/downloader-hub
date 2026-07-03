@@ -2,7 +2,10 @@
   "name": "downloader-hub",
   "version": "1.0.0",
   "scripts": {
-    "dev": "convex dev"
+    "dev": "convex dev",
+    "typecheck": "tsc -p ./convex --noEmit",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,css,md}\"",
+    "check": "bun run typecheck && bun run format"
   },
   "keywords": [],
   "author": "",
@@ -15,6 +18,8 @@
     "lodash": "^4.17.21"
   },
   "devDependencies": {
-    "@types/lodash": "^4.17.20"
+    "@types/lodash": "^4.17.20",
+    "prettier": "^3.9.4",
+    "typescript": "^6.0.3"
   }
 }

@@ -52,8 +52,10 @@ fn main() {
 async fn async_main(
     config: config::Config,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    peering::init_peering_endpoint(config.peer).await?;
-    peering::rpc::broadcast::RpcBroadcaster::init()?;
+    let capabilities = app_peer_comms::rpc::request::Capabilities::Bot {
+        platform: config.cmd.platform().to_string(),
+    };
+    peering::init_peering_endpoint(config.peer, capabilities).await?;
 
     cmd::run(config.cmd).await;
 

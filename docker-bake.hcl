@@ -31,7 +31,7 @@ variable "UPX_VERSION" {
 }
 
 variable "YT_DLP_VERSION" {
-  default = "2026.06.09"
+  default = "latest"
 }
 
 group "default" {

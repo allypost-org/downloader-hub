@@ -1,25 +1,35 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
-use app_config::common::{PeerCommsBotConfig, PeerCommsBotTicketConfig};
+use app_config::common::{
+    PeerCommsBotConfig, PeerCommsBotTicketConfig, PeerCommsBotTicketFromApiConfig,
+};
 use app_helpers::futures::retry_future::{RetryConfig, run_retried};
 use app_peer_comms::{
     PeeringEndpoint,
+    rpc::request::Capabilities,
     ticket::{
         Ticket,
         targeted::{TargetedTicket, TicketTarget},
     },
 };
-use tracing::{debug, error, trace};
+use tracing::{debug, error, info, trace};
 
-use crate::peering::jwt::JwtPair;
+use crate::peering::rpc::RpcClient;
 
-pub mod jwt;
 pub mod rpc;
+
+static HEARTBEAT: OnceLock<()> = OnceLock::new();
+
+static CONNECT_CONFIG: OnceLock<PeerCommsBotTicketFromApiConfig> = OnceLock::new();
 
 pub async fn init_peering_endpoint(
     config: PeerCommsBotConfig,
+    capabilities: Capabilities,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let (ticket, refresh_token, token) = run_retried(
+    let ticket = run_retried(
         "Get ticket",
         Box::new({
             let ticket = config.ticket.clone();
@@ -42,17 +52,7 @@ pub async fn init_peering_endpoint(
     .await
     .1?;
 
-    let token_pair = if let Some(token) = token {
-        JwtPair::new(app_peer_comms::jwt::JwtPair {
-            token,
-            refresh_token,
-        })
-    } else {
-        jwt::fetch_by_refresh_token(&config.ticket.api.url, refresh_token).await?
-    };
-
-    jwt::JwtPair::init(token_pair);
-    rpc::RpcClient::init(&config.ticket.api.url);
+    let central_addr = ticket.main.clone();
 
     debug!(target: PeeringEndpoint::trace_span_name(), ?ticket, "Got ticket");
 
@@ -72,22 +72,57 @@ pub async fn init_peering_endpoint(
 
     PeeringEndpoint::init(pe)?;
 
-    tokio::task::spawn(async move {
-        loop {
-            tokio::time::sleep(Duration::from_mins(1)).await;
+    _ = CONNECT_CONFIG.set(config.ticket.api.clone());
 
-            if let Err(e) = jwt::JwtPair::refresh_via_refresh_token(&config.ticket.api.url).await {
-                error!(target: PeeringEndpoint::trace_span_name(), ?e, "Failed to refresh token");
+    if let Err(e) = RpcClient::init(config.ticket.api.key.clone(), central_addr, capabilities).await
+    {
+        error!(target: PeeringEndpoint::trace_span_name(), ?e, "Failed to authenticate irpc session");
+        return Err(e);
+    }
+
+    HEARTBEAT.get_or_init(|| {
+        tokio::spawn(async {
+            loop {
+                let jitter = rand::random_range(0..5_000u64);
+                tokio::time::sleep(Duration::from_millis(30_000 + jitter)).await;
+                if let Err(e) = RpcClient::heartbeat().await {
+                    debug!(?e, "heartbeat failed");
+                }
             }
-        }
+        });
     });
 
     Ok(())
 }
 
+pub async fn reconnect() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let api = CONNECT_CONFIG
+        .get()
+        .ok_or("peering not initialized (no connect config)")?;
+    info!(target: PeeringEndpoint::trace_span_name(), "Re-bootstrapping: re-fetching join-ticket from central API");
+    let ticket = fetch_ticket_from_api(api.clone()).await?;
+    let central_addr = ticket.main.clone();
+    RpcClient::reauth(central_addr).await?;
+    info!(target: PeeringEndpoint::trace_span_name(), "Re-authenticated irpc session against central");
+    Ok(())
+}
+
 async fn get_ticket(
     config: PeerCommsBotTicketConfig,
-) -> Result<(Ticket, Arc<str>, Option<Arc<str>>), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<Ticket, Box<dyn std::error::Error + Send + Sync>> {
+    if let Some(ticket_config) = config.ticket {
+        trace!(target: PeeringEndpoint::trace_span_name(), ?ticket_config, "Parsing ticket from config");
+        let ticket: Ticket =
+            TargetedTicket::from_str(&ticket_config.ticket, TicketTarget::Bot).map(Into::into)?;
+        return Ok(ticket);
+    }
+
+    fetch_ticket_from_api(config.api).await
+}
+
+async fn fetch_ticket_from_api(
+    api: PeerCommsBotTicketFromApiConfig,
+) -> Result<Ticket, Box<dyn std::error::Error + Send + Sync>> {
     #[derive(Debug, serde::Deserialize)]
     struct TicketResp {
         data: TicketRespData,
@@ -95,32 +130,16 @@ async fn get_ticket(
     #[derive(Debug, serde::Deserialize)]
     struct TicketRespData {
         ticket: String,
-        jwt_token: Arc<str>,
-        refresh_token: Arc<str>,
     }
 
-    if let Some(ticket_config) = config.ticket {
-        trace!(target: PeeringEndpoint::trace_span_name(), ?ticket_config, "Parsing ticket from config");
-        let ticket: Ticket =
-            TargetedTicket::from_str(&ticket_config.ticket, TicketTarget::Bot).map(Into::into)?;
+    let url = api.url.join("/api/v1/join-ticket")?;
 
-        let Some(refresh_token) = ticket.refresh_token.clone() else {
-            return Err("Ticket must have a refresh token".into());
-        };
-
-        return Ok((ticket, refresh_token, ticket_config.jwt_token));
-    }
-
-    let api_config = config.api;
-
-    let url = api_config.url.join("/api/v1/join-ticket")?;
-
-    trace!(target: PeeringEndpoint::trace_span_name(), %url, "No ticket provided, fetching from API");
+    trace!(target: PeeringEndpoint::trace_span_name(), %url, "Fetching ticket from API");
 
     let res = app_requests::Client::builder()
         .build()?
         .get(url)
-        .header("Authorization", format!("Bearer {}", api_config.key))
+        .header("Authorization", format!("Bearer {}", api.key))
         .send()
         .await?
         .error_for_status()?
@@ -131,7 +150,5 @@ async fn get_ticket(
 
     trace!(target: PeeringEndpoint::trace_span_name(), ?data, "Parsing ticket from API");
 
-    let ticket = TargetedTicket::from_str(&data.ticket, TicketTarget::Bot).map(Into::into)?;
-
-    Ok((ticket, data.refresh_token, Some(data.jwt_token)))
+    Ok(TargetedTicket::from_str(&data.ticket, TicketTarget::Bot).map(Into::into)?)
 }

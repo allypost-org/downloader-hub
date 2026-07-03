@@ -29,20 +29,6 @@ impl From<(RequestId, app_database::api::requests::AddErrorsResult)> for AddErro
     }
 }
 
-impl From<AddErrorsResult> for super::CentralMessage {
-    fn from(value: AddErrorsResult) -> Self {
-        Self::WorkRequestAddErrorsResult(value)
-    }
-}
-
-impl From<(RequestId, app_database::api::requests::AddErrorsResult)> for super::CentralMessage {
-    fn from(value: (RequestId, app_database::api::requests::AddErrorsResult)) -> Self {
-        let value: AddErrorsResult = value.into();
-
-        value.into()
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AddErrorsResultStatus {
@@ -50,6 +36,8 @@ pub enum AddErrorsResultStatus {
     RequestNotInProgress,
     RequestNotTakenByYou,
     Ok,
+    BackendError,
+    Unauthorized,
 }
 
 impl From<app_database::api::requests::AddErrorsResult> for AddErrorsResultStatus {

@@ -1,6 +1,8 @@
 use std::{sync::Arc, time::Duration};
 
-use app_config::common::{PeerCommsWorkerConfig, PeerCommsWorkerTicketConfig};
+use app_config::common::{
+    PeerCommsWorkerConfig, PeerCommsWorkerTicketConfig, PeerCommsWorkerTicketFromApiConfig,
+};
 use app_helpers::futures::{
     retry_future::{RetryConfig, keep_running, run_retried},
     run_future,
@@ -8,7 +10,6 @@ use app_helpers::futures::{
 };
 use app_peer_comms::{
     PeeringEndpoint,
-    jwt::targeted::TargetedJwtConfig,
     ticket::{
         Ticket,
         targeted::{TargetedTicket, TicketTarget},
@@ -21,7 +22,7 @@ use tracing::{debug, error, trace};
 use super::CmdResult;
 
 pub mod config;
-mod global;
+pub mod rpc;
 
 mod app;
 
@@ -69,7 +70,19 @@ async fn async_run(config: WorkerConfig) -> CmdResult {
 
     let (_, res) = keep_running(
         "Worker",
-        Box::new(move || app::run(conf.clone())),
+        Box::new(move || {
+            let conf = conf.clone();
+            async move {
+                let central_addr = match fetch_ticket_from_api(&conf).await {
+                    Ok(t) => t.main,
+                    Err(e) => {
+                        error!(?e, "Failed to re-fetch join-ticket for worker");
+                        return Err(e);
+                    }
+                };
+                app::run(conf, central_addr).await
+            }
+        }),
         RetryConfig::new()
             .with_retry_delays(Arc::from([
                 Duration::from_millis(300),
@@ -84,11 +97,7 @@ async fn async_run(config: WorkerConfig) -> CmdResult {
                 Duration::from_secs(8),
                 Duration::from_secs(5),
             ]))
-            .with_reset_retries_after(
-                TargetedJwtConfig::default_token_expiration_duration()
-                    .checked_sub(&chrono::Duration::seconds(30))
-                    .and_then(|x| x.to_std().ok()),
-            ),
+            .with_reset_retries_after(Some(Duration::from_mins(5))),
     )
     .await;
 
@@ -97,8 +106,10 @@ async fn async_run(config: WorkerConfig) -> CmdResult {
     res
 }
 
-async fn init_peering_endpoint(config: PeerCommsWorkerConfig) -> CmdResult {
-    let (ticket, _refresh_token, _token) = run_retried(
+async fn init_peering_endpoint(
+    config: PeerCommsWorkerConfig,
+) -> Result<app_peer_comms::IrohEndpointAddr, super::CmdErr> {
+    let ticket = run_retried(
         "Get ticket",
         Box::new({
             let ticket = config.ticket.clone();
@@ -125,6 +136,8 @@ async fn init_peering_endpoint(config: PeerCommsWorkerConfig) -> CmdResult {
 
     debug!(target: PeeringEndpoint::trace_span_name(), ?ticket, "Got ticket");
 
+    let central_addr = ticket.main.clone();
+
     let pe = PeeringEndpoint::builder(config.common, ticket.topic_id())
         .with_main_node(Some(ticket.main.id))
         .with_peers(
@@ -141,33 +154,15 @@ async fn init_peering_endpoint(config: PeerCommsWorkerConfig) -> CmdResult {
 
     PeeringEndpoint::init(pe)?;
 
-    Ok(())
+    Ok(central_addr)
 }
 
-async fn get_ticket(
-    config: PeerCommsWorkerTicketConfig,
-) -> Result<(Ticket, Arc<str>, Option<Arc<str>>), super::CmdErr> {
-    #[derive(Debug, serde::Deserialize)]
-    struct TicketResp {
-        data: TicketRespData,
-    }
-    #[derive(Debug, serde::Deserialize)]
-    struct TicketRespData {
-        ticket: String,
-        jwt_token: Arc<str>,
-        refresh_token: Arc<str>,
-    }
-
+async fn get_ticket(config: PeerCommsWorkerTicketConfig) -> Result<Ticket, super::CmdErr> {
     if let Some(ticket_config) = config.ticket {
         trace!(target: PeeringEndpoint::trace_span_name(), ?ticket_config, "Parsing ticket from config");
         let ticket: Ticket = TargetedTicket::from_str(&ticket_config.ticket, TicketTarget::Worker)
             .map(Into::into)?;
-
-        let Some(refresh_token) = ticket.refresh_token.clone() else {
-            return Err(super::CmdErr::from("Ticket must have a refresh token"));
-        };
-
-        return Ok((ticket, refresh_token, ticket_config.jwt_token));
+        return Ok(ticket);
     }
 
     let api_config = config
@@ -175,14 +170,29 @@ async fn get_ticket(
         .as_ref()
         .expect("At least one of `api_url` or `ticket` must be set");
 
-    let url = api_config.url.join("/api/v1/join-ticket")?;
+    fetch_ticket_from_api(api_config).await
+}
 
-    trace!(target: PeeringEndpoint::trace_span_name(), %url, "No ticket provided, fetching from API");
+async fn fetch_ticket_from_api(
+    api: &PeerCommsWorkerTicketFromApiConfig,
+) -> Result<Ticket, super::CmdErr> {
+    #[derive(Debug, serde::Deserialize)]
+    struct TicketResp {
+        data: TicketRespData,
+    }
+    #[derive(Debug, serde::Deserialize)]
+    struct TicketRespData {
+        ticket: String,
+    }
+
+    let url = api.url.join("/api/v1/join-ticket")?;
+
+    trace!(target: PeeringEndpoint::trace_span_name(), %url, "Fetching ticket from API");
 
     let res = app_requests::Client::builder()
         .build()?
         .get(url)
-        .header("Authorization", format!("Bearer {}", api_config.key))
+        .header("Authorization", format!("Bearer {}", api.key))
         .send()
         .await?
         .error_for_status()?
@@ -193,7 +203,5 @@ async fn get_ticket(
 
     trace!(target: PeeringEndpoint::trace_span_name(), ?data, "Parsing ticket from API");
 
-    let ticket = TargetedTicket::from_str(&data.ticket, TicketTarget::Worker).map(Into::into)?;
-
-    Ok((ticket, data.refresh_token, Some(data.jwt_token)))
+    Ok(TargetedTicket::from_str(&data.ticket, TicketTarget::Worker).map(Into::into)?)
 }

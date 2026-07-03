@@ -50,24 +50,6 @@ impl<'a> TryFrom<&'a app_database::api::requests::RequestInfoResponse> for WorkR
     }
 }
 
-impl From<WorkRequest> for super::super::CentralMessage {
-    fn from(msg: WorkRequest) -> Self {
-        Self::WorkRequest(Box::new(msg))
-    }
-}
-
-impl From<Vec<WorkRequest>> for super::super::CentralMessage {
-    fn from(msg: Vec<WorkRequest>) -> Self {
-        Self::WorkRequests(msg.into())
-    }
-}
-
-impl From<Arc<[WorkRequest]>> for super::super::CentralMessage {
-    fn from(msg: Arc<[WorkRequest]>) -> Self {
-        Self::WorkRequests(msg)
-    }
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum WorkRequestError {
     #[error("Invalid work request info: {0}")]

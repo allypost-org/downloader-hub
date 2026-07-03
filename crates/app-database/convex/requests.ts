@@ -38,7 +38,7 @@ export const add = mutation({
     requestId: v.id(requestsId),
   }),
   handler: async (ctx, args) => {
-    if (!args.idempotencyKey) {
+    if (args.idempotencyKey) {
       const existing = await ctx.db
         .query(requestsId)
         .withIndex("by_idempotency_key", (q) =>
@@ -83,6 +83,7 @@ const requestDataReturn = {
   metadata: requests.metadata,
   status: requests.status,
   errors: requests.errors,
+  refusedBy: requests.refusedBy,
 };
 
 export const getFirstAvailable = query({
@@ -105,6 +106,7 @@ export const getFirstAvailable = query({
       metadata: row.metadata,
       status: row.status,
       errors: row.errors,
+      refusedBy: row.refusedBy ?? [],
     };
   },
 });
@@ -125,6 +127,7 @@ export const getAllAvailable = query({
       metadata: row.metadata,
       status: row.status,
       errors: row.errors,
+      refusedBy: row.refusedBy ?? [],
     }));
   },
 });
@@ -159,10 +162,9 @@ export const getMineInProgress = query({
       await ctx.db
         .query(requestsId)
         .withIndex("by_status_type", (q) =>
-          q.eq("status.Type", requestFailed.Type.value).eq(
-            "requester",
-            args.authedId,
-          ),
+          q
+            .eq("status.Type", requestFailed.Type.value)
+            .eq("requester", args.authedId),
         )
         .collect()
     ).filter(
@@ -175,6 +177,7 @@ export const getMineInProgress = query({
       metadata: row.metadata,
       status: row.status,
       errors: row.errors,
+      refusedBy: row.refusedBy ?? [],
     }));
   },
 });
@@ -261,6 +264,7 @@ export const take = mutation({
       metadata: row.metadata,
       status,
       errors: row.errors,
+      refusedBy: row.refusedBy ?? [],
     } as const;
   },
 });
@@ -605,6 +609,118 @@ export const free = mutation({
       ok: true,
       code: "Ok",
     } as const;
+  },
+});
+
+export const refuse = mutation({
+  args: {
+    requestId: v.id(requestsId),
+    takerId: requestInProgress.by,
+  },
+  returns: v.union(
+    v.object({
+      ok: v.literal(false),
+      code: v.literal("RequestNotFound"),
+    }),
+    v.object({
+      ok: v.literal(false),
+      code: v.literal("RequestNotInProgress"),
+    }),
+    v.object({
+      ok: v.literal(false),
+      code: v.literal("RequestNotTakenByYou"),
+    }),
+    v.object({
+      ok: v.literal(true),
+      code: v.literal("Ok"),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const row = await ctx.db.get(args.requestId);
+
+    if (!row) {
+      return { ok: false, code: "RequestNotFound" } as const;
+    }
+
+    if (row.status.Type !== "inProgress") {
+      return { ok: false, code: "RequestNotInProgress" } as const;
+    }
+
+    if (row.status.by !== args.takerId) {
+      return { ok: false, code: "RequestNotTakenByYou" } as const;
+    }
+
+    const tries = row.tries > 0n ? row.tries - 1n : 0n;
+    const refusedBy = row.refusedBy?.includes(args.takerId)
+      ? row.refusedBy
+      : [...(row.refusedBy ?? []), args.takerId];
+
+    await Promise.all([
+      ctx.db.patch(args.requestId, {
+        status: { Type: "pending" },
+        tries,
+        refusedBy,
+        lastModified: BigInt(Date.now()),
+        errors: [],
+      }),
+      ctx.scheduler.cancel(row.status.CleanupId),
+    ]);
+
+    return { ok: true, code: "Ok" } as const;
+  },
+});
+
+export const release = mutation({
+  args: {
+    requestId: v.id(requestsId),
+    takerId: requestInProgress.by,
+  },
+  returns: v.union(
+    v.object({
+      ok: v.literal(false),
+      code: v.literal("RequestNotFound"),
+    }),
+    v.object({
+      ok: v.literal(false),
+      code: v.literal("RequestNotInProgress"),
+    }),
+    v.object({
+      ok: v.literal(false),
+      code: v.literal("RequestNotTakenByYou"),
+    }),
+    v.object({
+      ok: v.literal(true),
+      code: v.literal("Ok"),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const row = await ctx.db.get(args.requestId);
+
+    if (!row) {
+      return { ok: false, code: "RequestNotFound" } as const;
+    }
+
+    if (row.status.Type !== "inProgress") {
+      return { ok: false, code: "RequestNotInProgress" } as const;
+    }
+
+    if (row.status.by !== args.takerId) {
+      return { ok: false, code: "RequestNotTakenByYou" } as const;
+    }
+
+    const tries = row.tries > 0n ? row.tries - 1n : 0n;
+
+    await Promise.all([
+      ctx.db.patch(args.requestId, {
+        status: { Type: "pending" },
+        tries,
+        lastModified: BigInt(Date.now()),
+        errors: [],
+      }),
+      ctx.scheduler.cancel(row.status.CleanupId),
+    ]);
+
+    return { ok: true, code: "Ok" } as const;
   },
 });
 

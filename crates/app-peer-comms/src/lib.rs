@@ -12,16 +12,17 @@ use app_config::{
     common::{BlobConfig, PeerCommsCommonConfig},
 };
 pub use app_requests::install_default_crypto_provider;
-use bytes::Bytes;
 use futures::StreamExt;
 use iroh::{
     Endpoint, EndpointAddr, RelayMode, RelayUrl, SecretKey, Watcher,
     address_lookup::{DnsAddressLookup, MemoryLookup},
     endpoint::Connection,
-    protocol::Router,
+    protocol::{Router, RouterBuilder},
 };
 pub use iroh::{
-    EndpointAddr as IrohEndpointAddr, EndpointId, endpoint::Connection as IrohConnection,
+    EndpointAddr as IrohEndpointAddr, EndpointId,
+    endpoint::Connection as IrohConnection,
+    protocol::{AcceptError as IrohAcceptError, ProtocolHandler as IrohProtocolHandler},
 };
 pub use iroh_blobs::{
     BlobFormat as IrohBlobFormat, HashAndFormat as IrohHashAndFormat,
@@ -38,25 +39,24 @@ use iroh_blobs::{
     get::{Stats as IrohBlobStats, request::GetBlobResult},
     store::fs as blobs_store_fs,
 };
-pub use iroh_gossip::{api::Event as GossipEvent, proto::TopicId};
 use iroh_gossip::{
-    api::{ApiError, GossipSender, GossipTopic},
+    api::{ApiError, GossipTopic},
     net::Gossip,
 };
+pub use iroh_gossip::{
+    api::{Event as GossipEvent, GossipSender as IrohGossipSender, GossipTopic as IrohGossipTopic},
+    proto::TopicId,
+};
 use iroh_mdns_address_lookup::MdnsAddressLookup;
+pub use irpc;
+pub use irpc_iroh;
 use tokio::{fs::File, io::AsyncWriteExt, sync::RwLock};
 use tracing::{debug, error, info, trace};
 use url::Url;
 
-pub use crate::message::Message;
-use crate::{
-    jwt::JwtPair,
-    message::{SignedMessage, SignedMessageError},
-};
-
 pub mod helpers;
-pub mod jwt;
 pub mod message;
+pub mod rpc;
 pub mod ticket;
 
 pub struct PeeringEndpointBuilder {
@@ -66,6 +66,7 @@ pub struct PeeringEndpointBuilder {
     refresh_url: Option<Url>,
     refresh_token: Option<Arc<str>>,
     main_node_id: Option<EndpointId>,
+    router_hook: Option<Box<dyn FnOnce(RouterBuilder) -> RouterBuilder + Send + 'static>>,
 }
 impl PeeringEndpointBuilder {
     const fn new(config: PeerCommsCommonConfig, topic_id: TopicId) -> Self {
@@ -76,12 +77,22 @@ impl PeeringEndpointBuilder {
             refresh_url: None,
             main_node_id: None,
             refresh_token: None,
+            router_hook: None,
         }
     }
 
     #[must_use]
     pub fn with_peers(mut self, peers: Vec<EndpointAddr>) -> Self {
         self.peers = peers;
+        self
+    }
+
+    #[must_use]
+    pub fn with_router_hook<F>(mut self, hook: F) -> Self
+    where
+        F: FnOnce(RouterBuilder) -> RouterBuilder + Send + 'static,
+    {
+        self.router_hook = Some(Box::new(hook));
         self
     }
 
@@ -196,41 +207,6 @@ impl PeeringEndpoint {
         trace!(target: PeeringEndpoint::trace_span_name(), topic = ?self.topic_id, ?peers, "Initializing gossip subscribe");
 
         self.gossip.subscribe(self.topic_id, peers).await
-    }
-
-    pub fn encoded_message<T>(
-        &self,
-        message: T,
-        auth: Option<JwtPair>,
-    ) -> Result<Bytes, SignedMessageError>
-    where
-        T: Into<Message>,
-    {
-        SignedMessage::sign_and_encode(self.secret_key(), &message.into(), auth)
-    }
-
-    pub async fn broadcast_encoded_message<T>(
-        &self,
-        message: T,
-        sender: &GossipSender,
-        auth: Option<JwtPair>,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
-    where
-        T: Into<Message>,
-    {
-        let message = message.into();
-        trace!(target: PeeringEndpoint::trace_span_name(), ?message, "Broadcasting message to peers");
-        let bytes = self.encoded_message(message, auth)?;
-        sender.broadcast(bytes).await?;
-
-        Ok(())
-    }
-
-    pub fn decode_message(
-        &self,
-        bytes: &[u8],
-    ) -> Result<(EndpointId, message::Message, Option<JwtPair>), SignedMessageError> {
-        SignedMessage::verify_and_decode(bytes)
     }
 }
 
@@ -497,7 +473,8 @@ impl PeeringEndpoint {
             refresh_token: builder.refresh_token,
         };
 
-        let (router, gossip, blobs) = Self::create_router(endpoint, builder.config.blob).await?;
+        let (router, gossip, blobs) =
+            Self::create_router(endpoint, builder.config.blob, builder.router_hook).await?;
 
         Ok(Self {
             router,
@@ -602,6 +579,7 @@ impl PeeringEndpoint {
     async fn create_router(
         endpoint: Endpoint,
         blob_config: BlobConfig,
+        router_hook: Option<Box<dyn FnOnce(RouterBuilder) -> RouterBuilder + Send + 'static>>,
     ) -> Result<(Router, Gossip, BlobsProtocol), Box<dyn std::error::Error + Send + Sync>> {
         trace!(target: PeeringEndpoint::trace_span_name(), ?blob_config, endpoint = ?endpoint.id(), "Creating router");
         let gossip = Gossip::builder().spawn(endpoint.clone());
@@ -628,10 +606,14 @@ impl PeeringEndpoint {
             }
         };
 
-        let router = Router::builder(endpoint)
+        let builder = Router::builder(endpoint)
             .accept(iroh_gossip::ALPN, gossip.clone())
-            .accept(iroh_blobs::ALPN, blobs.clone())
-            .spawn();
+            .accept(iroh_blobs::ALPN, blobs.clone());
+        let builder = match router_hook {
+            Some(hook) => hook(builder),
+            None => builder,
+        };
+        let router = builder.spawn();
 
         debug!(target: PeeringEndpoint::trace_span_name(), "Router is ready");
 

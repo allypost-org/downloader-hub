@@ -1,3 +1,4 @@
 pub mod authed;
+pub mod connections;
 pub mod request;
 pub mod requests;

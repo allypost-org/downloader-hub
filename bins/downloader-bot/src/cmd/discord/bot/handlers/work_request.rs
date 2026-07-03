@@ -39,33 +39,15 @@ pub async fn watch_work_requests() -> Result<(), anyhow::Error> {
 
     debug!("Connected to work requests watcher");
 
-    while let Some(ws_msg) = reqs_it.next().await {
-        let ws_msg = match ws_msg {
-            Ok(x) => x,
-            Err(e) => {
-                error!(?e, "Got error from work requests watcher socket");
-                return Err(e.into());
-            }
-        };
-
-        let msg_bytes = match ws_msg {
-            tokio_tungstenite::tungstenite::Message::Binary(x) => x,
-            tokio_tungstenite::tungstenite::Message::Text(x) => x.into(),
-            msg => {
-                trace!(?msg, "Got unknown message type");
-                continue;
-            }
-        };
-
-        let work_requests = match serde_json::from_slice::<Arc<[Arc<WorkRequest>]>>(&msg_bytes) {
-            Ok(x) => x,
-            Err(e) => {
-                warn!(?e, "Failed to parse work request");
-                continue;
-            }
-        };
-
-        for req in work_requests.iter() {
+    while let Some(snapshot) = match reqs_it.recv().await {
+        Ok(x) => x,
+        Err(e) => {
+            error!(?e, "Got error from work requests watcher");
+            return Err(e.into());
+        }
+    } {
+        for req in snapshot.requests.iter().cloned() {
+            let req = Arc::new(req);
             let status_message = match StatusMessage::from_metadata(&req.metadata) {
                 Ok(x) => x,
                 Err(e) => {
@@ -241,7 +223,7 @@ pub async fn process_work_request(
         debug!("Copied files to download directory");
     }
 
-    let max_bytes: u64 = DiscordBot::max_payload_bytes();
+    let max_bytes = DiscordBot::max_payload_bytes();
 
     let failed_files = send_attachment_groups(
         downloaded_files.iter().map(|(f, n)| (f, n.as_ref())),

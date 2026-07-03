@@ -1,45 +1,27 @@
-use axum::{
-    Json, Router,
-    http::StatusCode,
-    routing::{any, get, post},
-};
+use axum::{Json, Router, routing::get};
 use serde_json::json;
 
-mod auth;
-mod events;
-mod root;
+pub mod root;
 
 pub fn create_v1_router() -> Router {
     Router::new()
         .route("/join-ticket", get(root::get_join_ticket))
+        .route("/connections", get(root::get_connections))
         .route("/metrics", get(root::get_metrics))
-        .route("/ws", any(root::any_ws))
-        .route("/auth/token", post(auth::post_token))
-        .route("/auth/refresh", post(auth::post_refresh))
-        .route(
-            "/watch/work-requests/{id}",
-            any(root::get_work_request_watch),
-        )
-        .route(
-            "/watch/work-requests",
-            any(root::get_work_requests_watch_mine),
-        )
-        .route("/events/mine", any(events::any_mine))
 }
 
 #[derive(Debug)]
 pub enum V1Response<T> {
     Ok(T),
-    Err(StatusCode, String),
+    Err(http::StatusCode, String),
 }
 
-#[allow(dead_code)]
 impl<T> V1Response<T> {
     pub const fn ok(data: T) -> Self {
         Self::Ok(data)
     }
 
-    pub fn err<TErr>(status_code: StatusCode, error: TErr) -> Self
+    pub fn err<TErr>(status_code: http::StatusCode, error: TErr) -> Self
     where
         TErr: Into<String>,
     {
