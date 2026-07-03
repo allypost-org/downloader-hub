@@ -1,4 +1,7 @@
-use std::sync::{Arc, LazyLock, Mutex, OnceLock};
+use std::{
+    sync::{Arc, LazyLock, Mutex, OnceLock},
+    time::{Duration, Instant},
+};
 
 use app_database::{Database, api::authed::AuthedInfoResponse, entity::authed::AuthedForRole};
 use app_peer_comms::{
@@ -29,10 +32,15 @@ use app_peer_comms::{
 };
 use arc_swap::ArcSwapOption;
 use futures::StreamExt;
-use tokio::task::JoinHandle;
+use tokio::{sync::Semaphore, task::JoinHandle};
 use tracing::{debug, error, info, instrument, warn};
 
 use crate::cmd::central::components::{metrics, rpc::session::SessionRegistry};
+
+const INFLIGHT_LIMIT: usize = 64;
+const CAPABILITIES_TTL: Duration = Duration::from_secs(15);
+
+static CAPABILITIES_CACHE: Mutex<Option<(Instant, CapabilitiesSummary)>> = Mutex::new(None);
 
 mod distributor;
 mod revocation;
@@ -132,6 +140,7 @@ impl ProtocolHandler for CentralRpcServer {
         debug!("irpc connection accepted");
 
         let mut session: Option<(u64, Arc<str>, AuthedForRole)> = None;
+        let in_flight = Arc::new(Semaphore::new(INFLIGHT_LIMIT));
 
         loop {
             let Some(msg) = irpc_iroh::read_request::<CentralProtocol>(&conn).await? else {
@@ -167,7 +176,15 @@ impl ProtocolHandler for CentralRpcServer {
                     };
                     let server = self.clone();
                     let conn = conn.clone();
+                    let permit = in_flight.clone();
                     tokio::spawn(async move {
+                        let _permit = match permit.acquire_owned().await {
+                            Ok(p) => p,
+                            Err(e) => {
+                                warn!(?e, "in-flight semaphore closed");
+                                return;
+                            }
+                        };
                         server
                             .dispatch(req, session_id, authed_id, role, conn)
                             .await;
@@ -511,11 +528,30 @@ impl CentralRpcServer {
             }
             CentralRequest::GetCapabilities(r) => {
                 let WithChannels { tx, .. } = r;
-                let summary = aggregate_capabilities().await;
+                let summary = aggregate_capabilities_cached().await;
                 let _ = tx.send(summary).await;
             }
         }
     }
+}
+
+async fn aggregate_capabilities_cached() -> CapabilitiesSummary {
+    let value = CAPABILITIES_CACHE
+        .lock()
+        .expect("capabilities cache lock poisoned")
+        .clone();
+
+    if let Some((fetched_at, summary)) = value
+        && fetched_at.elapsed() < CAPABILITIES_TTL
+    {
+        return summary;
+    }
+
+    let summary = aggregate_capabilities().await;
+    *CAPABILITIES_CACHE
+        .lock()
+        .expect("capabilities cache lock poisoned") = Some((Instant::now(), summary.clone()));
+    summary
 }
 
 async fn aggregate_capabilities() -> CapabilitiesSummary {

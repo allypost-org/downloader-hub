@@ -39,11 +39,14 @@ pub async fn get_join_ticket(headers: HeaderMap) -> impl IntoResponse {
 }
 
 pub async fn get_connections(headers: HeaderMap) -> impl IntoResponse {
-    if require_authed(&headers).await.is_none() {
+    let Some(info) = require_authed(&headers).await else {
         return super::V1Response::err(
             StatusCode::UNAUTHORIZED,
             "Missing or invalid `Authorization: Bearer <api_key>` header",
         );
+    };
+    if let AuthedInfoResponse::NotAuthorized { error } = info {
+        return super::V1Response::err(StatusCode::UNAUTHORIZED, error);
     }
 
     match Database::global().connections_list().await {

@@ -61,15 +61,17 @@ impl SessionRegistry {
     }
 
     #[allow(clippy::needless_collect, clippy::significant_drop_tightening)]
-    pub fn revoke_invalid(&self, valid: &HashSet<Arc<str>>, now_ms: i64) -> usize {
+    pub fn revoke_invalid(&self, valid: &HashMap<Arc<str>, Option<i64>>, now_ms: i64) -> usize {
         let closed = {
             let mut inner = self.inner.lock().expect("session registry poisoned");
             let invalid: Vec<u64> = inner
                 .by_id
                 .iter()
                 .filter(|(_, session)| {
-                    !valid.contains(&session.authed_id)
-                        || session.expires_at.is_some_and(|t| t < now_ms)
+                    let latest_expiry = valid.get(&session.authed_id).copied().flatten();
+                    let effective_expiry = latest_expiry.or(session.expires_at);
+                    !valid.contains_key(&session.authed_id)
+                        || effective_expiry.is_some_and(|t| t < now_ms)
                 })
                 .map(|(&id, _)| id)
                 .collect();

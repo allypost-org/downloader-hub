@@ -1,5 +1,3 @@
-use std::{collections::HashSet, sync::Arc};
-
 use app_database::Database;
 use futures::StreamExt;
 use tracing::{debug, warn};
@@ -15,7 +13,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     while let Some(emission) = stream.next().await {
         match emission {
             Ok(list) => {
-                let valid: HashSet<Arc<str>> = list.iter().map(|entry| entry.id.clone()).collect();
+                let valid = list
+                    .iter()
+                    .map(|entry| (entry.id.clone(), entry.expires_at))
+                    .collect();
                 let now_ms = chrono::Utc::now().timestamp_millis();
                 let closed = registry.revoke_invalid(&valid, now_ms);
                 if closed > 0 {

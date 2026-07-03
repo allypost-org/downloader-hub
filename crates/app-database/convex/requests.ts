@@ -311,7 +311,7 @@ export const takeCleanup = internalMutation({
     }
 
     console.log(args.requestId, "cleaning up");
-    ctx.db.patch(args.requestId, {
+    await ctx.db.patch(args.requestId, {
       status: {
         Type: "pending",
       },
