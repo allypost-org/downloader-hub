@@ -325,7 +325,7 @@ pub async fn process_work_request(
 
     let mut media_groups = media_groups;
     let mut chat_id = status_message.chat_id();
-    while media_groups.len() > 0 {
+    while !media_groups.is_empty() {
         let Some(media_group) = media_groups.pop() else {
             break;
         };
