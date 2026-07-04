@@ -323,11 +323,15 @@ pub async fn process_work_request(
         }
     }
 
-    for media_group in media_groups {
-        trace!(?media_group, "Uploading media group");
+    let mut media_groups = media_groups;
+    let mut chat_id = status_message.chat_id();
+    while media_groups.len() > 0 {
+        let Some(media_group) = media_groups.pop() else {
+            break;
+        };
 
         let res = TelegramBot::bot()
-            .send_media_group(status_message.chat_id(), media_group)
+            .send_media_group(chat_id, media_group.clone())
             .reply_parameters(
                 ReplyParameters::new(status_message.msg_replying_to_id())
                     .allow_sending_without_reply(),
@@ -336,7 +340,27 @@ pub async fn process_work_request(
             .await;
 
         if let Err(e) = res {
-            warn!(?e, "Failed to send media group");
+            match e {
+                teloxide::RequestError::RetryAfter(secs) => {
+                    let dur = secs.duration();
+                    debug!(
+                        ?dur,
+                        "Telegram requested we wait for a bit before retrying send"
+                    );
+                    tokio::time::sleep(dur).await;
+                    trace!("Done sleeping, retrying send of media group");
+                }
+                teloxide::RequestError::MigrateToChatId(new_chat_id) => {
+                    debug!(?new_chat_id, "Telegram requested we migrate to a new chat");
+                    chat_id = new_chat_id;
+                }
+                e => {
+                    warn!(?e, "Failed to send media group");
+                    continue;
+                }
+            }
+
+            media_groups.push(media_group);
             continue;
         }
 
