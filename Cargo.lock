@@ -230,6 +230,7 @@ dependencies = [
  "scraper",
  "serde",
  "serde_json",
+ "size",
  "thiserror 2.0.18",
  "tl",
  "tokio",

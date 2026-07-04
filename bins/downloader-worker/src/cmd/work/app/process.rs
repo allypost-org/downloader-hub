@@ -83,8 +83,8 @@ async fn download_and_fix(request_id: Arc<str>, file_reference: FileReference, t
             debug!(?url, "Downloading files from URL");
 
             let mut paths = Vec::new();
+            let mut errs = Vec::new();
             {
-                let mut errs = Vec::new();
                 let req = match file_url_to_extract_info_request(&url) {
                     Ok(x) => x,
                     Err(e) => {
@@ -157,6 +157,14 @@ async fn download_and_fix(request_id: Arc<str>, file_reference: FileReference, t
             }
 
             if paths.is_empty() {
+                if let Some(err) = errs.iter().find(|e| e.is_max_filesize()) {
+                    Broadcaster::get().send_work_request_fail(
+                        request_id.clone(),
+                        &err.clone().original_message(),
+                    );
+                    return;
+                }
+
                 debug!("No files downloaded");
                 Broadcaster::get().send_work_request_update_status_message(
                     request_id.clone(),

@@ -79,8 +79,8 @@ pub async fn run(
             }
             Ok(GetWorkItemResult::Unauthorized) => {
                 error!(
-                    "this worker is not authorized to receive work items; \
-                     the API key is likely revoked or expired. Terminating."
+                    "this worker is not authorized to receive work items; the API key is likely \
+                     revoked or expired. Terminating."
                 );
                 std::process::exit(1);
             }

@@ -43,18 +43,28 @@ pub enum DownloaderError {
     FallibleFailed(String),
     #[error("Error downloading file: {0}")]
     Error(String),
+    #[error("Source exceeds configured max-filesize limit of {limit}")]
+    ExceedsMaxFilesize { limit: size::Size },
 }
 impl DownloaderError {
     #[must_use]
     pub fn original_message(self) -> String {
         match self {
             Self::FallibleFailed(e) | Self::Error(e) => e,
+            Self::ExceedsMaxFilesize { limit } => {
+                format!("source exceeds configured max-filesize limit of {limit}")
+            }
         }
     }
 
     #[must_use]
     pub const fn is_soft_error(&self) -> bool {
         matches!(self, Self::FallibleFailed(_))
+    }
+
+    #[must_use]
+    pub const fn is_max_filesize(&self) -> bool {
+        matches!(self, Self::ExceedsMaxFilesize { .. })
     }
 }
 

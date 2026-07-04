@@ -20,6 +20,9 @@ use crate::{config::ActionsConfig, downloaders::DownloaderOptions};
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct YtDlp;
 
+const MAX_FORMAT_SELECTOR: &str =
+    "bestvideo[height<=1080]+bestaudio/best[height<=1080]/bestvideo+bestaudio/best";
+
 #[async_trait::async_trait]
 #[typetag::serde]
 impl Downloader for YtDlp {
@@ -34,19 +37,27 @@ impl Downloader for YtDlp {
     async fn download(&self, req: &DownloadRequest) -> DownloaderReturn {
         match self.download_one(req).await {
             Ok(x) => Ok(x),
-            Err(e) if req.fallibility().can_fail() => Err(DownloaderError::FallibleFailed(e)),
-            Err(e) => Err(DownloaderError::Error(e)),
+            Err(e) if req.fallibility().can_fail() && !e.is_max_filesize() => {
+                Err(DownloaderError::FallibleFailed(e.original_message()))
+            }
+            Err(e) => Err(e),
         }
     }
 }
 
 impl YtDlp {
     #[allow(clippy::too_many_lines)]
-    pub async fn download_one(&self, request: &DownloadRequest) -> Result<DownloadResult, String> {
+    pub async fn download_one(
+        &self,
+        request: &DownloadRequest,
+    ) -> Result<DownloadResult, DownloaderError> {
         let yt_dlp = ActionsConfig::dependency_paths().yt_dlp_path();
         trace!("`yt-dlp' binary: {:?}", &yt_dlp);
-        let temp_dir = TempDir::in_tmp_with_prefix("downloader-hub_yt-dlp-")
-            .map_err(|e| format!("Failed to create temporary directory for yt-dlp: {e:?}"))?;
+        let temp_dir = TempDir::in_tmp_with_prefix("downloader-hub_yt-dlp-").map_err(|e| {
+            DownloaderError::Error(format!(
+                "Failed to create temporary directory for yt-dlp: {e:?}"
+            ))
+        })?;
         let output_template = get_output_template(temp_dir.path());
         let opts = request
             .downloader_options::<YtDlpOptions>()
@@ -94,7 +105,8 @@ impl YtDlp {
                 .arg("--no-mtime")
                 .arg("--no-embed-metadata")
                 .arg("--no-config")
-                .arg("--no-playlist");
+                .arg("--no-playlist")
+                .args(["--format", MAX_FORMAT_SELECTOR]);
 
             if let Some(max_filesize) = opts.max_filesize {
                 cmd = cmd
@@ -107,7 +119,9 @@ impl YtDlp {
 
                 let mut cookie_file =
                     TempFile::new_with_prefix("cookie-headers-").map_err(|e| {
-                        format!("Failed to create temporary file for yt-dlp cookie headers: {e:?}")
+                        DownloaderError::Error(format!(
+                            "Failed to create temporary file for yt-dlp cookie headers: {e:?}"
+                        ))
                     })?;
 
                 cookie_file
@@ -119,7 +133,11 @@ impl YtDlp {
                         )
                         .as_bytes(),
                     )
-                    .map_err(|e| format!("Failed to write cookie headers to file: {e:?}"))?;
+                    .map_err(|e| {
+                        DownloaderError::Error(format!(
+                            "Failed to write cookie headers to file: {e:?}"
+                        ))
+                    })?;
 
                 cmd = cmd.arg("--cookies").arg(cookie_file.path());
             }
@@ -144,9 +162,9 @@ impl YtDlp {
                 )
                 .args([
                     "--output",
-                    output_template
-                        .to_str()
-                        .ok_or_else(|| "Failed to convert path to string".to_string())?,
+                    output_template.to_str().ok_or_else(|| {
+                        DownloaderError::Error("Failed to convert path to string".to_string())
+                    })?,
                 ])
                 .args(["--user-agent", &ActionsConfig::request().user_agent])
                 .args(["--no-simulate", "--print", "after_move:filepath"])
@@ -164,12 +182,13 @@ impl YtDlp {
                 stderr: _,
                 status,
             }) if status.success() => {
-                let output = String::from_utf8(stdout)
-                    .map_err(|e| format!("Failed to convert output to UTF-8: {e:?}"))?;
+                let output = String::from_utf8(stdout).map_err(|e| {
+                    DownloaderError::Error(format!("Failed to convert output to UTF-8: {e:?}"))
+                })?;
                 let output_path = PathBuf::from(output.trim());
 
                 if !output_path.exists() {
-                    return Err("yt-dlp finished but file does not exist.".to_string());
+                    return Err(missing_file_err(&opts));
                 }
 
                 debug!("yt-dlp successful download to file: {:?}", output_path);
@@ -180,18 +199,17 @@ impl YtDlp {
                 stderr,
                 status: _,
             }) if is_image_error(stderr.clone()) => {
-                return generic::Generic
-                    .download(request)
-                    .await
-                    .map_err(DownloaderError::original_message);
+                return generic::Generic.download(request).await;
             }
             _ => {
-                return Err(format!("yt-dlp failed downloading item: {cmd_output:?}"));
+                return Err(DownloaderError::Error(format!(
+                    "yt-dlp failed downloading item: {cmd_output:?}"
+                )));
             }
         };
 
         if !new_file_path.exists() {
-            return Err("yt-dlp finished but file does not exist.".to_string());
+            return Err(missing_file_err(&opts));
         }
 
         let final_file_path = request
@@ -199,7 +217,9 @@ impl YtDlp {
             .join(new_file_path.file_name().unwrap_or_default());
 
         std::fs::copy(&new_file_path, &final_file_path).map_err(|e| {
-            format!("Failed to copy file from {new_file_path:?} to {final_file_path:?}: {e:?}")
+            DownloaderError::Error(format!(
+                "Failed to copy file from {new_file_path:?} to {final_file_path:?}: {e:?}"
+            ))
         })?;
 
         Ok(DownloadResult {
@@ -249,6 +269,15 @@ fn get_output_template<S: Into<PathBuf>>(download_dir: S) -> PathBuf {
     let file_name = format!("{file_identifier}.%(id).64s.%(ext)s");
 
     download_dir.into().join(file_name)
+}
+
+fn missing_file_err(opts: &YtDlpOptions) -> DownloaderError {
+    opts.max_filesize.map_or_else(
+        || DownloaderError::Error("yt-dlp finished but file does not exist.".to_string()),
+        |limit| DownloaderError::ExceedsMaxFilesize {
+            limit: size::Size::from_bytes(limit),
+        },
+    )
 }
 
 fn is_image_error(output: Vec<u8>) -> bool {

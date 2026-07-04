@@ -18,7 +18,7 @@ derive_more = "2.1.1"
 directories-next = "2.0.0"
 serde.workspace = true
 serde_json.workspace = true
-size = { version = "0.5.0", features = ["serde"] }
+size.workspace = true
 toml = "1.1.2"
 url.workspace = true
 validator = { version = "0.20.0", features = ["derive"] }

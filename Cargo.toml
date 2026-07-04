@@ -28,6 +28,7 @@ derive_more = { version = "2.1.1", features = ["debug"] }
 futures = { version = "0.3.32", features = ["thread-pool"] }
 serde = { version = "1.0", features = ["derive", "alloc", "rc"] }
 serde_json = { version = "1.0" }
+size = { version = "0.5.0", features = ["serde"] }
 thiserror = "2.0"
 tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "fs", "process", "io-uring"] }
 tracing = { version = "0.1.44" }
