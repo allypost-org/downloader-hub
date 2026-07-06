@@ -8,10 +8,13 @@
  * @module
  */
 
+import type * as accounts from "../accounts.js";
 import type * as authed from "../authed.js";
 import type * as connections from "../connections.js";
 import type * as cron from "../cron.js";
 import type * as helpers_auth from "../helpers/auth.js";
+import type * as lib_requestCounts from "../lib/requestCounts.js";
+import type * as lib_triggers from "../lib/triggers.js";
 import type * as requests from "../requests.js";
 
 import type {
@@ -21,10 +24,13 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  accounts: typeof accounts;
   authed: typeof authed;
   connections: typeof connections;
   cron: typeof cron;
   "helpers/auth": typeof helpers_auth;
+  "lib/requestCounts": typeof lib_requestCounts;
+  "lib/triggers": typeof lib_triggers;
   requests: typeof requests;
 }>;
 
@@ -54,4 +60,6 @@ export declare const internal: FilterApi<
   FunctionReference<any, "internal">
 >;
 
-export declare const components: {};
+export declare const components: {
+  requestCounts: import("@convex-dev/aggregate/_generated/component.js").ComponentApi<"requestCounts">;
+};

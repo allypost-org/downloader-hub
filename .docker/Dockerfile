@@ -110,6 +110,19 @@ RUN cd "$(mktemp --directory)" \
   && rm -rf "$(pwd)" \
   && echo "Installed upx ${UPX_VERSION}"
 COPY . .
+# Build the embedded SPA before compiling the Rust binary. rust-embed bakes
+# `frontend/dist` into the binary at compile time, so this must run first.
+# Only the admin binary ships a frontend; for the others this is a no-op.
+RUN if [ "${BINARY_NAME}" = "downloader-admin" ]; then \
+      apk add --no-cache curl unzip \
+      && curl -fsSL https://bun.sh/install | bash \
+      && export BUN_INSTALL="$HOME/.bun" \
+      && export PATH="$BUN_INSTALL/bin:$PATH" \
+      && cd bins/downloader-admin/frontend \
+      && bun install --frozen-lockfile \
+      && bun run build \
+      && cd /app; \
+    fi
 # Build and compress in a single RUN: the binary lives only in this step's
 # view of /app/target, and upx must read it before it goes to the output path.
 # (No /app/target cache mount: it would shadow the cooked deps from `deps`.)
@@ -120,6 +133,7 @@ COPY . .
 # is safe here because `cargo build` only *reads* the registry (deps are already
 # cooked into the layer by `deps`), and the mount is ephemeral per runner anyway.
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=shared \
+  SKIP_FRONTEND_BUILD=1 \
   cargo build \
   --release \
   --target "${RUST_TARGET}" \
@@ -269,5 +283,29 @@ LABEL org.opencontainers.image.title="downloader-worker"
 LABEL org.opencontainers.image.source="https://github.com/Allypost/downloader-hub"
 LABEL org.opencontainers.image.licenses="MPL-2.0"
 LABEL org.opencontainers.image.authors="Josip Igrec <me@allypost.net>"
+ENTRYPOINT [ "/entrypoint.sh" ]
+CMD [ "run" ]
+
+
+##########
+# admin  #
+##########
+##
+## downloader-admin runtime image.
+##
+FROM runtime-base AS admin
+ARG BINARY_NAME='downloader-admin'
+# Install app
+WORKDIR /app
+COPY --from=builder --chmod=755 "/${BINARY_NAME}" /usr/local/bin/
+# Entrypoint
+RUN printf '#!/bin/bash\n\n/usr/local/bin/%s "$@"\n' "${BINARY_NAME}" > /entrypoint.sh \
+  && chmod +x /entrypoint.sh
+LABEL maintainer="Josip Igrec <me@allypost.net>"
+LABEL org.opencontainers.image.title="downloader-admin"
+LABEL org.opencontainers.image.source="https://github.com/Allypost/downloader-hub"
+LABEL org.opencontainers.image.licenses="MPL-2.0"
+LABEL org.opencontainers.image.authors="Josip Igrec <me@allypost.net>"
+EXPOSE 8082
 ENTRYPOINT [ "/entrypoint.sh" ]
 CMD [ "run" ]

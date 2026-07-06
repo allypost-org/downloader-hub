@@ -35,7 +35,7 @@ variable "YT_DLP_VERSION" {
 }
 
 group "default" {
-  targets = ["bot", "central", "worker"]
+  targets = ["admin", "bot", "central", "worker"]
 }
 
 # Shared defaults, not a buildable target on its own.
@@ -78,5 +78,15 @@ target "worker" {
   tags = [
     "${REGISTRY}/downloader-worker:latest",
     "${REGISTRY}/downloader-worker:${SHA}",
+  ]
+}
+
+target "admin" {
+  inherits = ["common"]
+  target   = "admin"
+  args     = { BINARY_NAME = "downloader-admin" }
+  tags = [
+    "${REGISTRY}/downloader-admin:latest",
+    "${REGISTRY}/downloader-admin:${SHA}",
   ]
 }

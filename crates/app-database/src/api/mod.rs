@@ -1,3 +1,4 @@
+pub mod accounts;
 pub mod authed;
 pub mod connections;
 pub mod request;

@@ -8,6 +8,8 @@ pub enum Role {
     Worker,
     #[serde(rename = "bot")]
     Bot,
+    #[serde(rename = "admin")]
+    Admin,
 }
 
 impl From<app_database::entity::authed::AuthedForRole> for Role {
@@ -15,6 +17,7 @@ impl From<app_database::entity::authed::AuthedForRole> for Role {
         match value {
             app_database::entity::authed::AuthedForRole::Worker => Self::Worker,
             app_database::entity::authed::AuthedForRole::Bot => Self::Bot,
+            app_database::entity::authed::AuthedForRole::Admin => Self::Admin,
         }
     }
 }
@@ -24,6 +27,7 @@ impl From<&app_database::entity::authed::AuthedForRole> for Role {
         match value {
             app_database::entity::authed::AuthedForRole::Worker => Self::Worker,
             app_database::entity::authed::AuthedForRole::Bot => Self::Bot,
+            app_database::entity::authed::AuthedForRole::Admin => Self::Admin,
         }
     }
 }

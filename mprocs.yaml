@@ -54,3 +54,18 @@ procs:
         "saturn-dev-bot-discord",
         "discord",
       ]
+
+  admin:
+    cmd:
+      [
+        "just",
+        "dev-watch",
+        "downloader-admin",
+        "run",
+        "--peer-comms-blob-store-path",
+        "./dev/peer-comms-blobs-store-admin/",
+      ]
+
+  admin-fe:
+    cwd: ./bins/downloader-admin/frontend
+    cmd: ["bun", "run", "dev"]

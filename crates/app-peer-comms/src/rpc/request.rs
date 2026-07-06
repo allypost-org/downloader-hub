@@ -1,8 +1,12 @@
 use std::{collections::HashMap, sync::Arc};
 
+use app_database::entity::accounts::{AccountPlace, AccountPlaceRef, AccountUser, AccountUserRef};
 use serde::{Deserialize, Serialize};
 
-use crate::message::v1::common::{RequestId, file::FileReference, request_info::RequestInfo};
+use crate::{
+    message::v1::common::{RequestId, file::FileReference, request_info::RequestInfo},
+    rpc::session::Role,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,6 +41,7 @@ pub enum Capabilities {
     Bot {
         platform: String,
     },
+    Admin,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,6 +106,31 @@ pub struct WorkRequestMake {
     pub info: RequestInfo,
     pub metadata: HashMap<String, String>,
     pub idempotency_key: Option<String>,
+    #[serde(default)]
+    pub ordered_by: Option<AccountUserRef>,
+    #[serde(default)]
+    pub ordered_in: Option<AccountPlaceRef>,
+}
+
+/// Refresh metadata for end-users / places.
+///
+/// Bots call this on each client message (where the freshest data is
+/// available). Central upserts into the `account_users` / `account_places`
+/// tables. Idempotent on `(platform, platformId)`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountsUpsert {
+    #[serde(default)]
+    pub users: Vec<AccountUser>,
+    #[serde(default)]
+    pub places: Vec<AccountPlace>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountsUpsertResult {
+    pub users: u64,
+    pub places: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -116,3 +146,41 @@ pub struct WorkRequestGetMineInProgress;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetCapabilities;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminListSessions;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminSessionInfo {
+    pub authed_id: Arc<str>,
+    pub role: Role,
+    pub connected_at: u64,
+    pub expires_at: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AdminSessionsResult {
+    Unauthorized,
+    Ok(Vec<AdminSessionInfo>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminListParkedWorkers;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminParkedWorker {
+    pub authed_id: Arc<str>,
+    pub since: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AdminParkedWorkersResult {
+    Unauthorized,
+    Ok(Vec<AdminParkedWorker>),
+}

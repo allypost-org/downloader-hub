@@ -54,6 +54,10 @@ db-dev:
     cd ./crates/app-database \
     && bun run dev \
 
+db-codegen:
+    cd ./crates/app-database \
+    && bun run convex codegen \
+
 fmt-dev: lint-fix && fmt
     rustup run nightly cargo fmt --all \
 
@@ -88,7 +92,7 @@ docker-build target *args:
         "$@"
 
 [parallel]
-docker-push-all: (docker-push 'allypost/downloader-central') (docker-push 'allypost/downloader-worker') (docker-push 'allypost/downloader-bot')
+docker-push-all: (docker-push 'allypost/downloader-central') (docker-push 'allypost/downloader-worker') (docker-push 'allypost/downloader-bot') (docker-push 'allypost/downloader-admin')
 
 docker-push tag *args:
     shift; \

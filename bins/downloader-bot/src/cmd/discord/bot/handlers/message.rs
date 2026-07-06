@@ -7,17 +7,20 @@ use app_peer_comms::message::v1::{
     },
 };
 use linkify::{LinkFinder, LinkKind};
-use serenity::all::Message;
+use serenity::{all::Message, prelude::Context};
 use tracing::{info, warn};
 use url::Url;
 
 use crate::{
-    cmd::discord::bot::{discord_bot::DiscordBot, helpers::status_message::StatusMessage},
+    cmd::discord::bot::{
+        discord_bot::DiscordBot,
+        helpers::{account, status_message::StatusMessage},
+    },
     peering::rpc::RpcClient,
 };
 
-#[tracing::instrument(name = "discord-download", skip(msg, urls))]
-pub async fn handle_download_request(msg: &Message, mut urls: Vec<Url>) {
+#[tracing::instrument(name = "discord-download", skip(ctx, msg, urls))]
+pub async fn handle_download_request(ctx: &Context, msg: &Message, mut urls: Vec<Url>) {
     info!(url_count = urls.len(), "Adding download request to queue");
 
     let mut status_message = StatusMessage::from_message(msg);
@@ -33,6 +36,18 @@ pub async fn handle_download_request(msg: &Message, mut urls: Vec<Url>) {
     }
 
     status_message.update_message("Processing message...").await;
+
+    let (user_snapshot, places, place_ref) = account::from_message(msg, &ctx.cache);
+    {
+        let mut users = Vec::new();
+        if let Some((user, _)) = &user_snapshot {
+            users.push(user.clone());
+        }
+        if let Err(e) = RpcClient::accounts_upsert(users, places).await {
+            warn!(?e, "failed to upsert account metadata");
+        }
+    }
+    let user_ref = user_snapshot.map(|(_, r)| r);
 
     let max_bytes = DiscordBot::max_payload_bytes();
     let mut added_some = false;
@@ -71,6 +86,8 @@ pub async fn handle_download_request(msg: &Message, mut urls: Vec<Url>) {
             RequestInfo::DownloadAndFix(file_ref),
             url_status_message.to_metadata(),
             Some(format!("discord-{}-{}-{}", msg.channel_id, msg.id, i)),
+            user_ref.clone(),
+            place_ref.clone(),
         )
         .await
         {

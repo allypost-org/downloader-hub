@@ -10,6 +10,7 @@ use teloxide::{
 use tracing::{debug, trace, warn};
 
 use super::super::TelegramBot;
+use crate::cmd::telegram::bot::helpers::retried::try_send_to_retrying;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(clippy::struct_field_names)]
@@ -74,22 +75,29 @@ impl StatusMessage {
         text: &str,
     ) -> Result<Message, teloxide::RequestError> {
         trace!(?self.chat_id, "Sending additional message");
-        TelegramBot::instance()
-            .send_message(self.chat_id, text)
-            .disable_notification(true)
-            .link_preview_options(LinkPreviewOptions {
-                is_disabled: true,
-                prefer_large_media: false,
-                prefer_small_media: false,
-                show_above_text: false,
-                url: None,
-            })
-            .reply_parameters(ReplyParameters::new(self.msg_id).allow_sending_without_reply())
-            .await
-            .map_err(|e| {
-                warn!(chat_id = ?self.chat_id, ?e, "Failed to send additional message");
-                e
-            })
+        try_send_to_retrying(
+            self.chat_id,
+            (text.to_string(), self.msg_id),
+            Box::new(move |chat_id, (text, msg_id)| async move {
+                TelegramBot::instance()
+                    .send_message(chat_id, text)
+                    .disable_notification(true)
+                    .link_preview_options(LinkPreviewOptions {
+                        is_disabled: true,
+                        prefer_large_media: false,
+                        prefer_small_media: false,
+                        show_above_text: false,
+                        url: None,
+                    })
+                    .reply_parameters(ReplyParameters::new(msg_id).allow_sending_without_reply())
+                    .await
+            }),
+        )
+        .await
+        .map_err(|e| {
+            warn!(chat_id = ?self.chat_id, ?e, "Failed to send additional message");
+            e
+        })
     }
 
     pub async fn update_message(&mut self, text: &str) {
@@ -102,16 +110,23 @@ impl StatusMessage {
         for _ in 0..3 {
             match self.status_msg_id() {
                 Some(reply_id) => {
-                    let res = TelegramBot::instance()
-                        .edit_message_text(self.chat_id, reply_id, text)
-                        .link_preview_options(LinkPreviewOptions {
-                            is_disabled: true,
-                            prefer_large_media: false,
-                            prefer_small_media: false,
-                            show_above_text: false,
-                            url: None,
-                        })
-                        .await;
+                    let res = try_send_to_retrying(
+                        self.chat_id,
+                        text.to_string(),
+                        Box::new(move |chat_id, text| async move {
+                            TelegramBot::instance()
+                                .edit_message_text(chat_id, reply_id, text)
+                                .link_preview_options(LinkPreviewOptions {
+                                    is_disabled: true,
+                                    prefer_large_media: false,
+                                    prefer_small_media: false,
+                                    show_above_text: false,
+                                    url: None,
+                                })
+                                .await
+                        }),
+                    )
+                    .await;
 
                     if matches!(
                         res,

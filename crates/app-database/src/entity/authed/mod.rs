@@ -22,6 +22,8 @@ pub enum AuthedForRole {
     Worker,
     #[serde(rename = "bot")]
     Bot,
+    #[serde(rename = "admin")]
+    Admin,
 }
 
 impl From<AuthedForRole> for &'static str {
@@ -35,6 +37,7 @@ impl From<&AuthedForRole> for &'static str {
         match value {
             AuthedForRole::Worker => "worker",
             AuthedForRole::Bot => "bot",
+            AuthedForRole::Admin => "admin",
         }
     }
 }

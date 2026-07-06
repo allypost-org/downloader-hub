@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 app-config.workspace = true
+app-database.workspace = true
 app-helpers.workspace = true
 app-logger.workspace = true
 app-peer-comms.workspace = true

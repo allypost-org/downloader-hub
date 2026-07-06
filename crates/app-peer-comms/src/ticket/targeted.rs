@@ -64,6 +64,8 @@ pub enum TicketTarget {
     Bot,
     #[serde(rename = "worker")]
     Worker,
+    #[serde(rename = "admin")]
+    Admin,
 }
 
 impl TicketTarget {
@@ -72,6 +74,7 @@ impl TicketTarget {
         match self {
             Self::Bot => "bot",
             Self::Worker => "wrkr",
+            Self::Admin => "admn",
         }
     }
 }
