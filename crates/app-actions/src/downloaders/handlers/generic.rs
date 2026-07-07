@@ -1,9 +1,10 @@
 use std::{ffi::OsString, path::PathBuf, string::ToString};
 
-use app_config::{common::Size, timeframe::Timeframe};
+use app_config::common::Size;
 use app_helpers::id::time_id;
 use app_requests::Client;
 use http::header;
+use jiff::{Span, tz::TimeZone};
 use mime2ext::mime2ext;
 use serde::{Deserialize, Serialize};
 use tokio::{fs::File, io::AsyncWriteExt};
@@ -46,7 +47,7 @@ pub struct GenericDownloaderOptions {
     max_filesize: Option<Size>,
 
     #[serde(default)]
-    timeout: Option<Timeframe>,
+    timeout: Option<Span>,
 }
 impl GenericDownloaderOptions {
     #[must_use]
@@ -55,11 +56,8 @@ impl GenericDownloaderOptions {
     }
 
     #[must_use]
-    pub fn with_timeout<T>(mut self, timeout: Option<T>) -> Self
-    where
-        T: Into<Timeframe>,
-    {
-        self.timeout = timeout.map(Into::into);
+    pub const fn with_timeout(mut self, timeout: Option<Span>) -> Self {
+        self.timeout = timeout;
         self
     }
 }
@@ -96,7 +94,14 @@ impl Generic {
         let mut res = Client::request_from_url(url)?.headers(url.headers().clone());
 
         if let Some(timeout) = options.timeout {
-            res = res.timeout(timeout.into());
+            let relative = jiff::Timestamp::now().to_zoned(TimeZone::UTC);
+            let timeout = timeout
+                .to_duration(&relative)
+                .expect("downloader timeout must resolve to a concrete duration");
+            res = res.timeout(
+                std::time::Duration::try_from(timeout.abs())
+                    .expect("downloader timeout must fit in std::time::Duration"),
+            );
         }
 
         let mut res = res

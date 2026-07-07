@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use serenity::{Client, all::GatewayIntents};
-use tracing::{error, info, instrument};
+use tracing::{debug, error, info, instrument};
 
 use super::CmdResult;
 use crate::cmd::discord::{bot::discord_bot::DiscordBot, config::DiscordConfig};
@@ -24,6 +24,8 @@ pub async fn run(config: DiscordConfig) -> CmdResult {
         | GatewayIntents::DIRECT_MESSAGES
         | GatewayIntents::DIRECT_MESSAGE_REACTIONS
         | GatewayIntents::MESSAGE_CONTENT;
+
+    debug!(?intents, "Discord bot intents");
 
     let mut client = Client::builder(config.bot.bot_token, intents)
         .event_handler(bot::Handler::new(bot::HandlerConfig {

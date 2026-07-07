@@ -13,5 +13,3 @@ Grab-bag of utility modules. No single theme; mostly thin wrappers around std / 
 - `tree_yielder` — async tree walker. The only file in the repo with a `#[test]`.
 - `ip`, `domain` — network/DNS helpers.
 - `unique_vec`, `results`, `encoding`, `id`, `dirs` — small utilities.
-
-Re-exports `app_config::timeframe`.

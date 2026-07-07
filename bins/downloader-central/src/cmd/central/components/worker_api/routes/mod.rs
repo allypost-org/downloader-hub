@@ -97,12 +97,12 @@ where
             .layer(SetResponseHeaderLayer::appending(
                 header::DATE,
                 |_response: &Response<_>| {
-                    Some(
-                        chrono::Utc::now()
-                            .to_rfc2822()
-                            .parse()
-                            .expect("Invalid date"),
-                    )
+                    let now = jiff::Timestamp::now();
+                    let mut buf = String::new();
+                    jiff::fmt::rfc2822::DateTimePrinter::new()
+                        .print_timestamp(&now, &mut buf)
+                        .expect("printing a timestamp as RFC 2822 is infallible");
+                    Some(buf.parse().expect("Invalid date"))
                 },
             ))
             .layer(SetResponseHeaderLayer::if_not_present(

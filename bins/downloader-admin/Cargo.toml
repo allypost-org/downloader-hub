@@ -17,7 +17,6 @@ arc-swap.workspace = true
 axum = { version = "0.8.6", features = ["macros", "ws"] }
 axum-extra = { version = "0.12.6", features = ["cookie-signed", "cookie-key-expansion"] }
 base64 = "0.22"
-chrono.workspace = true
 clap.workspace = true
 const_format = "0.2.35"
 cookie = "0.18.1"

@@ -11,6 +11,8 @@ run package *args:
         --bin '{{ package }}' \
         -- "$@" \
 
+build-all: (build "downloader-cli") (build "downloader-central") (build "downloader-bot") (build "downloader-worker")
+
 build bin:
     APPLICATION_NAME='{{ bin }}' \
     cargo build \

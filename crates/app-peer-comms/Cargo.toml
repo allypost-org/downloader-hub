@@ -16,7 +16,6 @@ app-database.workspace = true
 app-requests.workspace = true
 bao-tree = "0.16.0"
 bytes = { version = "1.11.1", features = ["serde"] }
-chrono.workspace = true
 data-encoding = "2.11.0"
 derive_more = "2.1.1"
 futures.workspace = true
@@ -27,6 +26,7 @@ iroh-mdns-address-lookup = "0.4.0"
 iroh-tickets = "1.0"
 irpc = { version = "0.17", features = ["derive"] }
 irpc-iroh = "0.17"
+jiff.workspace = true
 moka = { version = "0.12.15", features = ["future"] }
 postcard = { version = "1.1.3", features = ["alloc", "crc"] }
 serde.workspace = true

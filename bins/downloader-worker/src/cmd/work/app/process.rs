@@ -13,6 +13,7 @@ use app_peer_comms::{
     },
 };
 use futures::{StreamExt, stream::FuturesUnordered};
+use jiff::ToSpan;
 use tracing::{Instrument, debug, error, info, trace, warn};
 
 use crate::cmd::work::app::{
@@ -45,9 +46,8 @@ async fn process_download_and_fix(request_meta: WorkRequestMeta, file_reference:
         }
     };
 
-    let timeout = chrono::Duration::minutes(10);
-    let mut tc =
-        TaskController::with_timeout(timeout.to_std().expect("Failed to convert chrono to std"));
+    let timeout = std::time::Duration::from_mins(10);
+    let mut tc = TaskController::with_timeout(timeout);
 
     let res = tc
         .spawn(download_and_fix(request_id.clone(), file_reference, tmp_dir).in_current_span())
@@ -258,7 +258,9 @@ async fn fix_stage_and_deliver(request_id: Arc<str>, paths: Vec<std::path::PathB
             return;
         }
     };
-    let expires = chrono::Utc::now() + chrono::Duration::minutes(30);
+    let expires = jiff::Timestamp::now()
+        .checked_add(30.minutes())
+        .expect("30-minute span is always representable as a Timestamp");
     for path in &fixed_paths {
         let hash_and_fmt = batch
             .add_path_with_opts(app_peer_comms::IrohAddPathOptions {

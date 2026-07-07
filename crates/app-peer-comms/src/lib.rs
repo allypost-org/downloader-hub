@@ -250,11 +250,7 @@ impl PeeringEndpoint {
         static CONN_CACHE: std::sync::LazyLock<moka::future::Cache<EndpointAddr, Connection>> =
             std::sync::LazyLock::new(|| {
                 moka::future::Cache::builder()
-                    .time_to_idle(
-                        chrono::Duration::minutes(2)
-                            .to_std()
-                            .expect("Failed converting chrono to std duration"),
-                    )
+                    .time_to_idle(Duration::from_mins(2))
                     .max_capacity(30)
                     .build()
             });
@@ -397,17 +393,14 @@ impl PeeringEndpoint {
     }
 
     #[must_use]
-    pub fn expiring_tag_name(expires: &chrono::DateTime<chrono::Utc>) -> String {
-        format!(
-            "{}{}",
-            Self::expiring_tag_prefix(),
-            expires.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
-        )
+    pub fn expiring_tag_name(expires: &jiff::Timestamp) -> String {
+        let formatted = expires.strftime("%Y-%m-%dT%H:%M:%SZ").to_string();
+        format!("{}{formatted}", Self::expiring_tag_prefix())
     }
 
     pub async fn delete_expired_tags(&self) -> Result<u64, iroh_blobs::api::RequestError> {
         let from = iroh_blobs::api::Tag::from(Self::expiring_tag_prefix());
-        let to = iroh_blobs::api::Tag::from(Self::expiring_tag_name(&chrono::Utc::now()));
+        let to = iroh_blobs::api::Tag::from(Self::expiring_tag_name(&jiff::Timestamp::now()));
 
         trace!(target: PeeringEndpoint::trace_span_name(), ?from, ?to, "Deleting expired tags");
 
@@ -417,7 +410,7 @@ impl PeeringEndpoint {
     pub async fn create_expiring_tag(
         &self,
         hashes: &[iroh_blobs::Hash],
-        expires: chrono::DateTime<chrono::Utc>,
+        expires: jiff::Timestamp,
     ) -> Result<Option<String>, iroh_blobs::api::RequestError> {
         if hashes.is_empty() {
             return Ok(None);

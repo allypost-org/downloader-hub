@@ -1,8 +1,8 @@
 use std::{string::ToString, sync::LazyLock};
 
-use app_config::timeframe::Timeframe;
 use app_requests::Client;
 use http::{HeaderMap, header};
+use jiff::ToSpan;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -100,7 +100,7 @@ impl Twitter {
     pub fn screenshot_tweet_url_info(&self, url: &Url) -> ExtractedUrlInfo {
         ExtractedUrlInfo::new(self.screenshot_tweet_url(url))
             .with_preferred_downloader(Some(Generic))
-            .with_downloader_options(Generic::options().with_timeout(Some(Timeframe::Seconds(60))))
+            .with_downloader_options(Generic::options().with_timeout(Some(60.seconds())))
     }
 
     pub fn is_post_url(url: &str) -> bool {
