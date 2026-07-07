@@ -55,4 +55,12 @@ pub enum CentralProtocol {
 
     #[rpc(tx = oneshot::Sender<request::CapabilitiesSummary>)]
     GetCapabilities(request::GetCapabilities),
+
+    #[rpc(tx = oneshot::Sender<request::AdminSessionsResult>)]
+    AdminListSessions(request::AdminListSessions),
+    #[rpc(tx = oneshot::Sender<request::AdminParkedWorkersResult>)]
+    AdminListParkedWorkers(request::AdminListParkedWorkers),
+
+    #[rpc(tx = oneshot::Sender<request::AccountsUpsertResult>)]
+    AccountsUpsert(request::AccountsUpsert),
 }

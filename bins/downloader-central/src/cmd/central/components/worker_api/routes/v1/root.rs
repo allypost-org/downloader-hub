@@ -31,6 +31,7 @@ pub async fn get_join_ticket(headers: HeaderMap) -> impl IntoResponse {
     let target = match info.for_role {
         AuthedForRole::Worker => TicketTarget::Worker,
         AuthedForRole::Bot => TicketTarget::Bot,
+        AuthedForRole::Admin => TicketTarget::Admin,
     };
 
     super::V1Response::ok(serde_json::json!({

@@ -1,4 +1,8 @@
-use std::{collections::VecDeque, sync::Arc};
+use std::{
+    collections::VecDeque,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use app_database::{
     Database,
@@ -6,6 +10,7 @@ use app_database::{
 };
 use app_peer_comms::{
     irpc::channel::oneshot, message::v1::central::get_work_item_result::GetWorkItemResult,
+    rpc::request::AdminParkedWorker,
 };
 use tokio::sync::mpsc;
 use tracing::{debug, error, trace, warn};
@@ -16,12 +21,14 @@ pub(super) struct Waiter {
     irpc_tx: oneshot::Sender<GetWorkItemResult>,
     authed_id: Arc<str>,
     session_id: u64,
+    since: u64,
 }
 
 pub(super) enum Cmd {
     Available(Arc<[RequestInfoResponse]>),
     GetWorkItem(Waiter),
     Disconnect { session_id: u64 },
+    ListParked(oneshot::Sender<Vec<AdminParkedWorker>>),
 }
 
 #[derive(Clone)]
@@ -48,12 +55,16 @@ impl WorkDistributor {
         session_id: u64,
         irpc_tx: oneshot::Sender<GetWorkItemResult>,
     ) {
+        let since = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(0));
         if let Err(err) = self
             .cmd_tx
             .send(Cmd::GetWorkItem(Waiter {
                 irpc_tx,
                 authed_id,
                 session_id,
+                since,
             }))
             .await
         {
@@ -69,6 +80,15 @@ impl WorkDistributor {
         if let Err(e) = self.cmd_tx.send(Cmd::Disconnect { session_id }).await {
             warn!(?e, "WorkDistributor gone; dropping disconnect");
         }
+    }
+
+    pub async fn list_parked(&self) -> Option<Vec<AdminParkedWorker>> {
+        let (tx, rx) = oneshot::channel();
+        if self.cmd_tx.send(Cmd::ListParked(tx)).await.is_err() {
+            warn!("WorkDistributor gone; failing list_parked");
+            return None;
+        }
+        rx.await.ok()
     }
 }
 
@@ -109,6 +129,16 @@ async fn run(mut rx: mpsc::Receiver<Cmd>) {
                     );
                 }
                 metrics::set_parked_workers(waiting.len());
+            }
+            Cmd::ListParked(tx) => {
+                let parked: Vec<AdminParkedWorker> = waiting
+                    .iter()
+                    .map(|w| AdminParkedWorker {
+                        authed_id: w.authed_id.clone(),
+                        since: w.since,
+                    })
+                    .collect();
+                let _ = tx.send(parked).await;
             }
         }
     }

@@ -16,7 +16,7 @@ Downloaded files are extracted, downloaded (via `yt-dlp`), converted/normalized 
 
 ## Architecture
 
-The project is a **Rust workspace** (edition 2024) of four binaries and nine library crates. Three of the binaries (`central`, `worker`, `bot`) form a peer-to-peer mesh over **[iroh](https://github.com/n0-computer/iroh)** QUIC connections, coordinated by `central`. State lives in a shared **[Convex](https://www.convex.dev/)** backend.
+The project is a **Rust workspace** (edition 2024) of five binaries and nine library crates. Three of the binaries (`central`, `worker`, `bot`) form a peer-to-peer mesh over **[iroh](https://github.com/n0-computer/iroh)** QUIC connections, coordinated by `central`; a fourth (`admin`) reads Convex directly and scrapes `central` over HTTP + irpc. State lives in a shared **[Convex](https://www.convex.dev/)** backend.
 
 ```mermaid
 flowchart LR
@@ -60,7 +60,7 @@ flowchart LR
 
 See [`docs/plans/2026-07-01_14-54_move-control-rpc-to-irpc.md`](docs/plans/2026-07-01_14-54_move-control-rpc-to-irpc.md) for the full design (implemented 2026-07-01).
 
-## The four binaries
+## The five binaries
 
 Each binary has its own `AGENTS.md` with layout, entrypoints, and startup contracts.
 
@@ -70,11 +70,13 @@ Each binary has its own `AGENTS.md` with layout, entrypoints, and startup contra
 | `downloader-worker` | performs downloads/processing via `app-actions` | yes (client) | `run`, `list { actions \| downloaders \| fixers \| all }` |
 | `downloader-bot` | user-facing bot (Telegram + Discord) | yes (client) | `telegram`, `discord` |
 | `downloader-cli` | local standalone tool | no | — (flat args) |
+| `downloader-admin` | operator UI (embedded React 19 SPA) | yes (client, admin role) | `run` |
 
 - **`downloader-central`** — the iroh coordination node. Serves the irpc control protocol (`app_peer_comms::rpc::CentralProtocol`), runs the `WorkDistributor` actor (parks workers on a blocking `getWorkItem` and pre-takes work on their behalf), watches Convex for session revocation, and exposes a minimal axum HTTP surface: `/api/v1/join-ticket` (bootstrap), `/api/v1/connections` (peer inventory), `/api/v1/metrics` (Prometheus), `/health`.
 - **`downloader-worker`** — connects to `central`, authenticates, and runs a sequential loop: `getWorkItem` (blocks until handed an item it hasn't refused) → process or `refuse` → repeat. Also runs `app-tasks` cron jobs (e.g. `yt-dlp` auto-updates) and an expired-blob-tag cleanup loop.
 - **`downloader-bot`** — multi-platform bot selected via a positional subcommand. Receives media/links from chat, creates work requests on `central`, and consumes a server-streaming `WorkRequestGetMineInProgress` irpc call to track and report progress. Telegram is built on `teloxide`, Discord on `serenity`.
 - **`downloader-cli`** — a single-file local tool that directly invokes `app_actions::download_file` / `fix_file`. Reads URLs and/or local file paths, downloads concurrently, fixes/renames/splits as requested. No peer-comms, no Convex, no `app-logger`.
+- **`downloader-admin`** — operator UI. An axum server with an embedded React 19 SPA (`rust-embed`). Reads Convex directly and scrapes `central` over HTTPS + a read-only irpc `Admin` role; performs privileged actions (retry/cancel/delete requests, manage authed tokens). Browser sessions are signed-cookie-authenticated against Convex `authed` rows with `for = "admin"`. See `bins/downloader-admin/AGENTS.md`.
 
 ## The library crates (`crates/`)
 

@@ -1,9 +1,13 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
-use app_peer_comms::IrohConnection as Connection;
+use app_peer_comms::{
+    IrohConnection as Connection,
+    rpc::{request::AdminSessionInfo, session::Role},
+};
 
 use crate::cmd::central::components::metrics;
 
@@ -28,11 +32,22 @@ struct RegistryInner {
 struct Session {
     authed_id: Arc<str>,
     conn: Connection,
+    role: Role,
+    connected_at: u64,
     expires_at: Option<u64>,
 }
 
 impl SessionRegistry {
-    pub fn register(&self, authed_id: Arc<str>, conn: Connection, expires_at: Option<u64>) -> u64 {
+    pub fn register(
+        &self,
+        authed_id: Arc<str>,
+        conn: Connection,
+        role: Role,
+        expires_at: Option<u64>,
+    ) -> u64 {
+        let connected_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(0));
         let id = {
             let mut inner = self.inner.lock().expect("session registry poisoned");
             let id = inner.next_id;
@@ -42,6 +57,8 @@ impl SessionRegistry {
                 Session {
                     authed_id: authed_id.clone(),
                     conn,
+                    role,
+                    connected_at,
                     expires_at,
                 },
             );
@@ -50,6 +67,20 @@ impl SessionRegistry {
         };
         metrics::session_added();
         id
+    }
+
+    pub fn list(&self) -> Vec<AdminSessionInfo> {
+        let inner = self.inner.lock().expect("session registry poisoned");
+        inner
+            .by_id
+            .values()
+            .map(|s| AdminSessionInfo {
+                authed_id: s.authed_id.clone(),
+                role: s.role.clone(),
+                connected_at: s.connected_at,
+                expires_at: s.expires_at,
+            })
+            .collect()
     }
 
     pub fn unregister(&self, id: u64) {

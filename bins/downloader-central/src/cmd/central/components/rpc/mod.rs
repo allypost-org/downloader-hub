@@ -233,11 +233,14 @@ impl CentralRpcServer {
                     warn!(?e, "Failed to upsert connection inventory row");
                 }
 
-                let id = self
-                    .registry
-                    .register(info.id.clone(), conn.clone(), info.expires_at);
-                metrics::auth_ok();
                 let role = info.for_role;
+                let id = self.registry.register(
+                    info.id.clone(),
+                    conn.clone(),
+                    (&role).into(),
+                    info.expires_at,
+                );
+                metrics::auth_ok();
                 let session_info = app_peer_comms::rpc::AuthedInfo {
                     id: info.id.clone(),
                     role: (&role).into(),
@@ -284,6 +287,7 @@ impl CentralRpcServer {
     ) {
         let is_worker = matches!(role, AuthedForRole::Worker);
         let is_bot = matches!(role, AuthedForRole::Bot);
+        let is_admin = matches!(role, AuthedForRole::Admin);
         metrics::rpc_request();
         match req {
             CentralRequest::Auth(_) => unreachable!("Auth is handled in the accept loop"),
@@ -491,7 +495,14 @@ impl CentralRpcServer {
                     return;
                 }
                 match Database::global()
-                    .requests_add(authed_id, inner.info, inner.metadata, inner.idempotency_key)
+                    .requests_add(
+                        authed_id,
+                        inner.info,
+                        inner.metadata,
+                        inner.idempotency_key,
+                        inner.ordered_by,
+                        inner.ordered_in,
+                    )
                     .await
                 {
                     Ok(resp) => {
@@ -501,6 +512,40 @@ impl CentralRpcServer {
                     Err(e) => {
                         error!(?e, "create work request failed");
                         let _ = tx.send(CreateResult::BackendError).await;
+                    }
+                }
+            }
+            CentralRequest::AccountsUpsert(r) => {
+                let WithChannels { inner, tx, .. } = r;
+                if !is_bot {
+                    let _ = tx
+                        .send(app_peer_comms::rpc::request::AccountsUpsertResult {
+                            users: 0,
+                            places: 0,
+                        })
+                        .await;
+                    return;
+                }
+                match Database::global()
+                    .accounts_upsert(&inner.users, &inner.places)
+                    .await
+                {
+                    Ok(result) => {
+                        let _ = tx
+                            .send(app_peer_comms::rpc::request::AccountsUpsertResult {
+                                users: result.users,
+                                places: result.places,
+                            })
+                            .await;
+                    }
+                    Err(e) => {
+                        error!(?e, "accounts upsert failed");
+                        let _ = tx
+                            .send(app_peer_comms::rpc::request::AccountsUpsertResult {
+                                users: 0,
+                                places: 0,
+                            })
+                            .await;
                     }
                 }
             }
@@ -543,6 +588,46 @@ impl CentralRpcServer {
                 let WithChannels { tx, .. } = r;
                 let summary = aggregate_capabilities_cached().await;
                 let _ = tx.send(summary).await;
+            }
+            CentralRequest::AdminListSessions(r) => {
+                let WithChannels { tx, .. } = r;
+                if !is_admin {
+                    let _ = tx
+                        .send(app_peer_comms::rpc::request::AdminSessionsResult::Unauthorized)
+                        .await;
+                    return;
+                }
+                let sessions = self.registry.list();
+                let _ = tx
+                    .send(app_peer_comms::rpc::request::AdminSessionsResult::Ok(
+                        sessions,
+                    ))
+                    .await;
+            }
+            CentralRequest::AdminListParkedWorkers(r) => {
+                let WithChannels { tx, .. } = r;
+                if !is_admin {
+                    let _ = tx
+                        .send(app_peer_comms::rpc::request::AdminParkedWorkersResult::Unauthorized)
+                        .await;
+                    return;
+                }
+                match distributor().list_parked().await {
+                    Some(workers) => {
+                        let _ = tx
+                            .send(app_peer_comms::rpc::request::AdminParkedWorkersResult::Ok(
+                                workers,
+                            ))
+                            .await;
+                    }
+                    None => {
+                        let _ = tx
+                            .send(
+                                app_peer_comms::rpc::request::AdminParkedWorkersResult::Unauthorized,
+                            )
+                            .await;
+                    }
+                }
             }
         }
     }

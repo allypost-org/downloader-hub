@@ -3,6 +3,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
+use app_database::entity::accounts::{AccountPlaceRef, AccountUserRef};
 use app_peer_comms::{
     IrohEndpointAddr, PeeringEndpoint, irpc, irpc_iroh,
     message::v1::{
@@ -113,6 +114,8 @@ impl RpcClient {
         info: T,
         metadata: HashMap<String, String>,
         idempotency_key: Option<String>,
+        ordered_by: Option<AccountUserRef>,
+        ordered_in: Option<AccountPlaceRef>,
     ) -> Result<CreateResult, irpc::Error>
     where
         T: Into<RequestInfo>,
@@ -122,7 +125,18 @@ impl RpcClient {
                 info: info.into(),
                 metadata,
                 idempotency_key,
+                ordered_by,
+                ordered_in,
             })
+            .await
+    }
+
+    pub async fn accounts_upsert(
+        users: Vec<app_database::entity::accounts::AccountUser>,
+        places: Vec<app_database::entity::accounts::AccountPlace>,
+    ) -> Result<request::AccountsUpsertResult, irpc::Error> {
+        Self::client()
+            .rpc(request::AccountsUpsert { users, places })
             .await
     }
 

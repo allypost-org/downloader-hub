@@ -1,0 +1,40 @@
+[package]
+name = "downloader-admin"
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+app-config.workspace = true
+app-database.workspace = true
+app-helpers.workspace = true
+app-logger.workspace = true
+app-peer-comms.workspace = true
+app-requests.workspace = true
+arc-swap.workspace = true
+axum = { version = "0.8.6", features = ["macros", "ws"] }
+axum-extra = { version = "0.12.6", features = ["cookie-signed", "cookie-key-expansion"] }
+base64 = "0.22"
+chrono.workspace = true
+clap.workspace = true
+const_format = "0.2.35"
+cookie = "0.18.1"
+dotenvy = "0.15.7"
+futures.workspace = true
+http = "1.4.2"
+mime_guess = "2.0.5"
+rust-embed = "8.7.2"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tower = "0.5.2"
+tower-http = { version = "0.7.0", features = ["full"] }
+tracing.workspace = true
+url.workspace = true
+validator.workspace = true
+
+[lints]
+workspace = true

@@ -212,7 +212,7 @@ impl EventHandler for Handler {
             Err(e) => {
                 if !urls.is_empty() {
                     trace!("Parse failed but message has URLs, treating as free-form download");
-                    handlers::message::handle_download_request(&msg, urls).await;
+                    handlers::message::handle_download_request(&ctx, &msg, urls).await;
                     return;
                 }
 
@@ -233,7 +233,7 @@ impl EventHandler for Handler {
             }
             BotCommand::DownloadAndFix { urls: cmd_urls } => {
                 let combined_urls = if cmd_urls.is_empty() { urls } else { cmd_urls };
-                handlers::message::handle_download_request(&msg, combined_urls).await;
+                handlers::message::handle_download_request(&ctx, &msg, combined_urls).await;
             }
             BotCommand::ListExtractors | BotCommand::ListDownloaders | BotCommand::ListFixers => {
                 use crate::cmd::_common::capabilities::{CapabilityKind, fetch, render};

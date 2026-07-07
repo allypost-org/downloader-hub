@@ -25,10 +25,10 @@ use crate::{
         _common::work_request::{WorkRequestGuard, WorkRequestLockMap},
         telegram::{
             bot::{
-                TelegramBot,
+                TelegramBot, helpers,
                 helpers::{
                     file_group::files_to_input_media_groups, file_id::FileId,
-                    status_message::StatusMessage,
+                    retried::try_send_to_retrying, status_message::StatusMessage,
                 },
             },
             common::downloadable::Downloadable,
@@ -59,6 +59,20 @@ pub async fn handle_message(msg: &TelegramMessage) -> ResponseResult<()> {
 
     status_message.update_message("Processing message...").await;
 
+    let (place_snapshot, place_ref) = helpers::account::place_from_chat(&msg.chat);
+    let user_snapshot = helpers::account::user_from_message(msg);
+    {
+        let mut users = Vec::new();
+        let places = vec![place_snapshot.clone()];
+        if let Some((user, _)) = &user_snapshot {
+            users.push(user.clone());
+        }
+        if let Err(e) = RpcClient::accounts_upsert(users, places).await {
+            warn!(?e, "failed to upsert account metadata");
+        }
+    }
+    let user_ref = user_snapshot.map(|(_, r)| r);
+
     let mut added_some = false;
     for (i, file_url) in file_urls.into_iter().enumerate() {
         let mut url_status_message = status_message
@@ -76,6 +90,8 @@ pub async fn handle_message(msg: &TelegramMessage) -> ResponseResult<()> {
             }),
             url_status_message.to_metadata(),
             Some(format!("tg-{}-{}-{}", msg.chat.id, msg.id, i)),
+            user_ref.clone(),
+            Some(place_ref.clone()),
         )
         .await
         {
@@ -323,48 +339,31 @@ pub async fn process_work_request(
         }
     }
 
-    let mut media_groups = media_groups;
-    let mut chat_id = status_message.chat_id();
-    while !media_groups.is_empty() {
-        let Some(media_group) = media_groups.pop() else {
-            break;
-        };
+    let replying_to_id = status_message.msg_replying_to_id();
+    for media_group in media_groups {
+        let res = try_send_to_retrying(
+            status_message.chat_id(),
+            media_group,
+            Box::new(move |chat_id, media_group| async move {
+                TelegramBot::bot()
+                    .send_media_group(chat_id, media_group)
+                    .reply_parameters(
+                        ReplyParameters::new(replying_to_id).allow_sending_without_reply(),
+                    )
+                    .send()
+                    .await
+            }),
+        )
+        .await;
 
-        let res = TelegramBot::bot()
-            .send_media_group(chat_id, media_group.clone())
-            .reply_parameters(
-                ReplyParameters::new(status_message.msg_replying_to_id())
-                    .allow_sending_without_reply(),
-            )
-            .send()
-            .await;
-
-        if let Err(e) = res {
-            match e {
-                teloxide::RequestError::RetryAfter(secs) => {
-                    let dur = secs.duration();
-                    debug!(
-                        ?dur,
-                        "Telegram requested we wait for a bit before retrying send"
-                    );
-                    tokio::time::sleep(dur).await;
-                    trace!("Done sleeping, retrying send of media group");
-                }
-                teloxide::RequestError::MigrateToChatId(new_chat_id) => {
-                    debug!(?new_chat_id, "Telegram requested we migrate to a new chat");
-                    chat_id = new_chat_id;
-                }
-                e => {
-                    warn!(?e, "Failed to send media group");
-                    continue;
-                }
+        match res {
+            Ok(_) => {
+                trace!("Media group sent");
             }
-
-            media_groups.push(media_group);
-            continue;
+            Err(e) => {
+                warn!(?e, "Failed to send media group");
+            }
         }
-
-        trace!("Media group sent");
     }
 
     status_message.delete_message().await;

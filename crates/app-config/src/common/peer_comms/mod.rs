@@ -1,8 +1,10 @@
+pub use admin::*;
 pub use bot::*;
 pub use central::*;
 pub use common::*;
 pub use worker::*;
 
+pub mod admin;
 pub mod bot;
 pub mod central;
 pub mod common;

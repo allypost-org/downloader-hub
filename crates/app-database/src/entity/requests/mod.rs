@@ -2,7 +2,11 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::entity::{_common::ScheduledFunctionId, authed::AuthedId};
+use crate::entity::{
+    _common::ScheduledFunctionId,
+    accounts::{AccountPlaceRef, AccountUserRef},
+    authed::AuthedId,
+};
 
 pub mod file_reference;
 pub mod request_info;
@@ -18,6 +22,10 @@ pub struct Request {
     pub status: RequestStatus,
     pub metadata: Option<HashMap<String, serde_json::Value>>,
     pub last_modified: i64,
+    #[serde(default)]
+    pub ordered_by: Option<AccountUserRef>,
+    #[serde(default)]
+    pub ordered_in: Option<AccountPlaceRef>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
