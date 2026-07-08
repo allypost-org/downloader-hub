@@ -266,7 +266,7 @@ where
         .fold(String::new(), |acc, a| format!("{},{}", acc, a));
 
     let mut base_level = EnvFilter::builder()
-        .with_default_directive(Level::WARN.into())
+        .with_default_directive(Level::INFO.into())
         .parse_lossy(default_levels);
 
     let env_directives = env::var("DOWNLOADER_HUB_LOG_LEVEL")
@@ -325,8 +325,8 @@ fn build_file_writer(log_file: Option<PathBuf>) -> FileWriterFn {
 
 pub fn set_log_level(log_level: &str) -> Result<(), Box<dyn std::error::Error>> {
     let mut base_level = EnvFilter::builder()
-        .with_default_directive(Level::WARN.into())
-        .parse_lossy("warn");
+        .with_default_directive(Level::INFO.into())
+        .parse_lossy("info");
 
     let set_directives = log_level
         .split(',')
