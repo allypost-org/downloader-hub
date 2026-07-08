@@ -20,6 +20,8 @@ pub struct StatusMessage {
     author_id: UserId,
     #[serde(default)]
     status_msg_id: Option<MessageId>,
+    #[serde(default)]
+    last_content: Option<String>,
 }
 
 impl StatusMessage {
@@ -34,6 +36,7 @@ impl StatusMessage {
             msg_id,
             author_id,
             status_msg_id,
+            last_content: None,
         }
     }
 
@@ -41,13 +44,9 @@ impl StatusMessage {
         self.channel_id
     }
 
-    pub fn reply_target(&self) -> MessageId {
-        self.status_msg_id.unwrap_or(self.msg_id)
-    }
-
-    pub fn reply_reference(&self) -> MessageReference {
+    pub fn original_message_reference(&self) -> MessageReference {
         MessageReference::new(MessageReferenceKind::default(), self.channel_id)
-            .message_id(self.reply_target())
+            .message_id(self.msg_id)
             .fail_if_not_exists(false)
     }
 
@@ -79,6 +78,7 @@ impl StatusMessage {
             msg_id: self.msg_id,
             author_id: self.author_id,
             status_msg_id: Some(new_msg.id),
+            last_content: Some(text.to_string()),
         })
     }
 
@@ -90,7 +90,7 @@ impl StatusMessage {
         trace!(channel_id = ?self.channel_id, "Sending additional message");
         let builder = CreateMessage::new()
             .content(text)
-            .reference_message(self.reply_reference());
+            .reference_message(self.original_message_reference());
         self.channel_id
             .send_message(Self::http(), builder)
             .await
@@ -112,57 +112,58 @@ impl StatusMessage {
     }
 
     async fn try_update_message(&mut self, text: &str) -> Result<(), serenity::Error> {
-        for _ in 0..3 {
-            match self.status_msg_id {
-                Some(msg_id) => {
-                    let builder = EditMessage::new().content(text);
-                    let res = self
-                        .channel_id
-                        .edit_message(Self::http(), msg_id, builder)
-                        .await;
-
-                    if Self::is_unknown_message_err(&res) {
-                        debug!(
-                            channel_id = ?self.channel_id,
-                            msg_id = ?msg_id,
-                            "Status message disappeared, will resend"
-                        );
-                        self.status_msg_id = None;
-                        continue;
-                    }
-
-                    if let Err(e) = res {
-                        warn!(
-                            channel_id = ?self.channel_id,
-                            msg_id = ?msg_id,
-                            ?e,
-                            "Failed to update message"
-                        );
-                        continue;
-                    }
-
-                    trace!(
-                        channel_id = ?self.channel_id,
-                        msg_id = ?msg_id,
-                        "Updated message"
-                    );
-                    return Ok(());
-                }
-                None => {
-                    let status_msg = self.try_send_additional_message(text).await?;
-                    self.status_msg_id = Some(status_msg.id);
-
-                    trace!(
-                        channel_id = ?self.channel_id,
-                        msg_id = ?self.status_msg_id(),
-                        "Sent additional message"
-                    );
-                    return Ok(());
-                }
-            }
+        if self.status_msg_id.is_some() && self.last_content.as_deref() == Some(text) {
+            trace!(channel_id = ?self.channel_id, "Status message unchanged, skipping edit");
+            return Ok(());
         }
 
-        Err(Self::unknown_message_err())
+        let Some(msg_id) = self.status_msg_id else {
+            let status_msg = self.try_send_additional_message(text).await?;
+            self.status_msg_id = Some(status_msg.id);
+            self.last_content = Some(text.to_string());
+
+            trace!(
+                channel_id = ?self.channel_id,
+                msg_id = ?self.status_msg_id(),
+                "Sent additional message"
+            );
+            return Ok(());
+        };
+
+        let builder = EditMessage::new().content(text);
+        let res = self
+            .channel_id
+            .edit_message(Self::http(), msg_id, builder)
+            .await;
+
+        if Self::is_unknown_message_err(&res) {
+            debug!(
+                channel_id = ?self.channel_id,
+                msg_id = ?msg_id,
+                "Status message disappeared, giving up"
+            );
+            self.status_msg_id = None;
+            self.last_content = None;
+            return Err(Self::unknown_message_err());
+        }
+
+        if let Err(e) = res {
+            warn!(
+                channel_id = ?self.channel_id,
+                msg_id = ?msg_id,
+                ?e,
+                "Failed to update message"
+            );
+            return Err(e);
+        }
+
+        self.last_content = Some(text.to_string());
+        trace!(
+            channel_id = ?self.channel_id,
+            msg_id = ?msg_id,
+            "Updated message"
+        );
+        Ok(())
     }
 
     pub async fn delete_message(&self) {

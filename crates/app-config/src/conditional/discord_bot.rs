@@ -54,11 +54,4 @@ pub struct DiscordBotConfig {
     /// If not set, the default value will be used.
     #[arg(long = "discord-max-payload-size", value_name = "MAX_PAYLOAD_SIZE", env = "DOWNLOADER_HUB_DISCORD_MAX_PAYLOAD_SIZE", value_hint = ValueHint::Other, default_value = "25MB")]
     pub max_payload_size: Size,
-
-    /// The maximum number of work requests the bot will process in parallel.
-    ///
-    /// Each work request may download and upload multiple files, so a higher
-    /// value increases memory and bandwidth usage.
-    #[arg(long = "discord-max-work-request-concurrency", value_name = "N", env = "DOWNLOADER_HUB_DISCORD_MAX_WORK_REQUEST_CONCURRENCY", value_hint = ValueHint::Other, default_value = "4")]
-    pub max_work_request_concurrency: usize,
 }

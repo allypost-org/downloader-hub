@@ -206,7 +206,7 @@ checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
 
 [[package]]
 name = "app-actions"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "anyhow",
  "app-config",
@@ -246,7 +246,7 @@ dependencies = [
 
 [[package]]
 name = "app-config"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "app-macros",
  "clap",
@@ -267,7 +267,7 @@ dependencies = [
 
 [[package]]
 name = "app-database"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "anyhow",
  "app-config",
@@ -286,7 +286,7 @@ dependencies = [
 
 [[package]]
 name = "app-helpers"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "addr",
  "anyhow",
@@ -317,7 +317,7 @@ dependencies = [
 
 [[package]]
 name = "app-logger"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "app-config",
  "tracing",
@@ -327,7 +327,7 @@ dependencies = [
 
 [[package]]
 name = "app-macros"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "quote",
  "syn 2.0.118",
@@ -335,7 +335,7 @@ dependencies = [
 
 [[package]]
 name = "app-peer-comms"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "anyhow",
  "app-config",
@@ -366,7 +366,7 @@ dependencies = [
 
 [[package]]
 name = "app-requests"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "derive_more 2.1.1",
  "http 1.4.2",
@@ -381,7 +381,7 @@ dependencies = [
 
 [[package]]
 name = "app-tasks"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "anyhow",
  "app-config",
@@ -1992,7 +1992,7 @@ checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
 name = "downloader-admin"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "app-config",
  "app-database",
@@ -2025,7 +2025,7 @@ dependencies = [
 
 [[package]]
 name = "downloader-bot"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "anyhow",
  "app-config",
@@ -2058,7 +2058,7 @@ dependencies = [
 
 [[package]]
 name = "downloader-central"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "accept-header",
  "app-config",
@@ -2092,7 +2092,7 @@ dependencies = [
 
 [[package]]
 name = "downloader-cli"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "app-actions",
  "app-config",
@@ -2108,7 +2108,7 @@ dependencies = [
 
 [[package]]
 name = "downloader-worker"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "app-actions",
  "app-config",

@@ -3,7 +3,7 @@ members = ["crates/*", "bins/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.10.1"
+version = "0.10.2"
 authors = ["Allypost"]
 description = "A meme downloader"
 edition = "2024"

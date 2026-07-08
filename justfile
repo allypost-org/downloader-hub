@@ -31,6 +31,7 @@ dev-build package *args:
     shift; \
     APPLICATION_NAME='{{ package }}' \
     cargo build \
+        --profile dev \
         --package '{{ package }}' \
         "$@"
 

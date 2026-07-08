@@ -15,6 +15,13 @@ pub struct WorkRequestGuard {
 }
 
 impl WorkRequestGuard {
+    pub fn is_processing(map: &Arc<Mutex<WorkRequestLockMap>>, request_id: &Arc<str>) -> bool {
+        let Ok(locks) = map.lock() else {
+            return false;
+        };
+        locks.contains_key(request_id)
+    }
+
     pub fn try_acquire(map: Arc<Mutex<WorkRequestLockMap>>, request_id: Arc<str>) -> Option<Self> {
         let semaphore = {
             let Ok(mut locks) = map.lock() else {

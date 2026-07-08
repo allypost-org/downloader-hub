@@ -28,13 +28,14 @@ where
     TFile: AsRef<Path> + Send,
     TName: AsRef<Path> + Send,
     F: FnMut(Vec<CreateAttachment>) -> Fut + Send,
-    Fut: Future<Output = ()> + Send,
+    Fut: Future<Output = Result<(), String>> + Send,
 {
     trace!(?files, max_size_bytes, "Getting file infos");
     let (file_infos, mut failed) = infos_from_files(files).await;
     trace!(?file_infos, "Got file infos");
 
     let mut current_group: Vec<CreateAttachment> = Vec::new();
+    let mut current_group_paths: Vec<PathBuf> = Vec::new();
     let mut current_group_size: u64 = 0;
 
     for info in file_infos {
@@ -78,16 +79,26 @@ where
                 current_group_size, "Flushing group"
             );
             current_group_size = 0;
-            on_group(std::mem::take(&mut current_group)).await;
+            let group_paths = std::mem::take(&mut current_group_paths);
+            if let Err(e) = on_group(std::mem::take(&mut current_group)).await {
+                for p in group_paths {
+                    failed.push((p, e.clone()));
+                }
+            }
         }
 
+        current_group_paths.push(path);
         current_group.push(attachment);
         current_group_size += size;
     }
 
     if !current_group.is_empty() {
         trace!(group_len = current_group.len(), "Flushing final group");
-        on_group(current_group).await;
+        if let Err(e) = on_group(current_group).await {
+            for p in current_group_paths {
+                failed.push((p, e.clone()));
+            }
+        }
     }
 
     trace!(?failed, "Got final failures");
