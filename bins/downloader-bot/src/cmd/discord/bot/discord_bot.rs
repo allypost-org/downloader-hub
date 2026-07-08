@@ -35,9 +35,4 @@ impl DiscordBot {
     pub fn max_payload_size() -> Size {
         Self::instance().config.max_payload_size
     }
-
-    pub fn max_payload_bytes() -> u64 {
-        u64::try_from(Self::max_payload_size().bytes())
-            .expect("max payload size must not be negative")
-    }
 }

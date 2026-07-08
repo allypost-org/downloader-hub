@@ -119,5 +119,13 @@ fn api_router() -> Router<AppState> {
             "/requests/backfill-ordered-refs",
             post(routes::backfill_ordered_refs),
         )
+        .route(
+            "/restrictions",
+            get(routes::list_restrictions).post(routes::create_restriction),
+        )
+        .route(
+            "/restrictions/{id}",
+            delete(routes::remove_restriction).put(routes::replace_restriction),
+        )
         .layer(from_fn(csrf::require_timestamp_header))
 }

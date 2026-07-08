@@ -13,9 +13,11 @@ convex = { version = "0.10.1", default-features = false, features = ["parking_lo
 data-encoding = "2.9.0"
 derive_more = "2.0.1"
 futures.workspace = true
+jiff.workspace = true
 maplit = "1.0.2"
 serde.workspace = true
 serde_json.workspace = true
+size.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

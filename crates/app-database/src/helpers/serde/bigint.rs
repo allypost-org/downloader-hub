@@ -19,13 +19,16 @@ where
 }
 
 pub mod option {
-    use serde::{Deserializer, Serializer};
+    use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
     where
         D: Deserializer<'de>,
     {
-        Ok(Some(super::deserialize(deserializer)?))
+        let opt: Option<String> = Option::deserialize(deserializer)?;
+        opt.map(|s| s.parse::<u64>())
+            .transpose()
+            .map_err(serde::de::Error::custom)
     }
 
     pub fn serialize<S>(value: &Option<u64>, serializer: S) -> Result<S::Ok, S::Error>

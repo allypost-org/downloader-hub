@@ -50,8 +50,8 @@ pub struct FileUrl {
     #[serde(default, rename = "h")]
     pub headers: Vec<(String, String)>,
 
-    #[serde(default, rename = "fsm")]
-    pub max_filesize: Option<u64>,
+    #[serde(default, rename = "fsm", skip_serializing_if = "Option::is_none")]
+    pub max_filesize: Option<size::Size>,
 }
 
 impl FileUrl {
@@ -100,7 +100,7 @@ impl FileUrl {
     }
 
     #[must_use]
-    pub const fn with_max_filesize(mut self, max_filesize: Option<u64>) -> Self {
+    pub const fn with_max_filesize(mut self, max_filesize: Option<size::Size>) -> Self {
         self.max_filesize = max_filesize;
         self
     }

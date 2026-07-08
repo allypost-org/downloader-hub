@@ -43,10 +43,12 @@ const CAPABILITIES_TTL: Duration = Duration::from_secs(15);
 static CAPABILITIES_CACHE: Mutex<Option<(Instant, CapabilitiesSummary)>> = Mutex::new(None);
 
 mod distributor;
+mod restrictions;
 mod revocation;
 mod session;
 
 pub use distributor::WorkDistributor;
+pub use restrictions::{AdmitDecision, RestrictionsManager, run as run_restrictions_watcher};
 pub use revocation::run as run_revocation_watcher;
 
 static SESSIONS: OnceLock<SessionRegistry> = OnceLock::new();
@@ -103,6 +105,18 @@ pub fn central_id() -> String {
         .get()
         .expect("central_id not initialized")
         .clone()
+}
+
+static RESTRICTIONS: LazyLock<ArcSwapOption<RestrictionsManager>> =
+    LazyLock::new(ArcSwapOption::empty);
+
+pub fn init_restrictions() {
+    RESTRICTIONS.store(Some(Arc::new(RestrictionsManager::new())));
+}
+
+/// Returns the restrictions manager if initialized, else `None` (fail-open).
+pub fn restrictions() -> Option<Arc<RestrictionsManager>> {
+    RESTRICTIONS.load_full()
 }
 
 #[derive(Clone, Debug)]
@@ -493,6 +507,19 @@ impl CentralRpcServer {
                 if !is_bot {
                     let _ = tx.send(CreateResult::Unauthorized).await;
                     return;
+                }
+                if let Some(mgr) = restrictions() {
+                    match mgr.check(inner.ordered_by.as_ref(), inner.ordered_in.as_ref()) {
+                        AdmitDecision::Allow => {}
+                        AdmitDecision::Banned { reason } => {
+                            let _ = tx.send(CreateResult::Banned { reason }).await;
+                            return;
+                        }
+                        AdmitDecision::RateLimited { retry_after } => {
+                            let _ = tx.send(CreateResult::RateLimited { retry_after }).await;
+                            return;
+                        }
+                    }
                 }
                 match Database::global()
                     .requests_add(

@@ -125,6 +125,44 @@ export type AccountPlacePatchBody = {
   parentPlatformId?: string | null;
 };
 
+export interface BanRule {
+  Type: "ban";
+  reason: string;
+  endsAt: string | null;
+}
+
+export interface LimitRule {
+  Type: "limit";
+  count: string;
+  timeframeMs: string;
+}
+
+export type RestrictionRule = BanRule | LimitRule;
+
+export interface RestrictionInfo {
+  id: string;
+  user: AccountRef | null;
+  place: AccountRef | null;
+  rule: RestrictionRule;
+}
+
+export type CreateRestrictionBody = {
+  user?: AccountRef;
+  place?: AccountRef;
+  rule:
+    | {
+        Type: "ban";
+        reason: string;
+        endsAt?: string;
+        duration?: string;
+      }
+    | {
+        Type: "limit";
+        count: number;
+        timeframe: string;
+      };
+};
+
 async function request<T>(
   method: string,
   path: string,
@@ -242,5 +280,21 @@ export const api = {
     request<{ started: boolean }>(
       "POST",
       "/requests/backfill-ordered-refs",
+    ),
+
+  listRestrictions: (type: "ban" | "limit") =>
+    request<RestrictionInfo[]>("GET", `/restrictions?type=${type}`),
+  createRestriction: (body: CreateRestrictionBody) =>
+    request<{ id: string }>("POST", "/restrictions", body),
+  updateRestriction: (id: string, body: CreateRestrictionBody) =>
+    request<{ updated: boolean }>(
+      "PUT",
+      `/restrictions/${encodeURIComponent(id)}`,
+      body,
+    ),
+  removeRestriction: (id: string) =>
+    request<{ removed: boolean }>(
+      "DELETE",
+      `/restrictions/${encodeURIComponent(id)}`,
     ),
 };

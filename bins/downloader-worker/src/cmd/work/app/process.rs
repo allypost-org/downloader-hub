@@ -117,7 +117,12 @@ async fn download_and_fix(request_id: Arc<str>, file_reference: FileReference, t
 
                 let download_results = download_requests
                     .into_iter()
-                    .map(|x| x.with_downloader_option("max-filesize", url.max_filesize))
+                    .map(|x| {
+                        x.with_downloader_option(
+                            "max-filesize",
+                            serde_json::to_value(url.max_filesize).unwrap_or_default(),
+                        )
+                    })
                     .map(|x| async move { download_file(&x).await })
                     .collect::<FuturesUnordered<_>>()
                     .collect::<Vec<_>>()

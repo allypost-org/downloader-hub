@@ -1,21 +1,41 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { type ColumnDef } from "@tanstack/react-table";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   api,
   type AccountPlaceInfo,
+  type AccountRef,
   type AccountUserInfo,
+  type RestrictionInfo,
 } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth-store";
+import {
+  appliesToAccount,
+  emptyRuleForm,
+  buildRule,
+  refKey,
+  restrictionDetail,
+  ruleFormFromRestriction,
+  type RuleFormState,
+} from "@/lib/restrictions";
+import { AccountAutocomplete } from "@/components/AccountAutocomplete";
+import { RestrictionRuleFields } from "@/components/RestrictionRuleFields";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { DataTable } from "@/components/DataTable";
 
 type Tab = "users" | "places";
@@ -26,12 +46,27 @@ function formatTime(ms: string | number): string {
   return new Date(n).toLocaleString();
 }
 
-function AccountUserEditor({
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="block space-y-1">
+      <span className="text-xs font-medium text-muted-foreground">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function AccountUserFields({
   user,
-  onClose,
+  onSaved,
 }: {
   user: AccountUserInfo;
-  onClose: () => void;
+  onSaved: () => void;
 }) {
   const qc = useQueryClient();
   const readonly = useAuthStore((s) => s.me?.readonly ?? false);
@@ -55,76 +90,66 @@ function AccountUserEditor({
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["accounts"] });
       void qc.invalidateQueries({ queryKey: ["account-names"] });
-      onClose();
+      onSaved();
     },
   });
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center justify-between text-sm">
-          <span>Edit user</span>
-          <Button size="sm" variant="ghost" onClick={onClose}>
-            Close
-          </Button>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="text-xs text-muted-foreground">
-          <Badge variant="secondary">{user.platform}</Badge>{" "}
-          <code>{user.platformId}</code>
-        </div>
-        <Field label="Username">
-          <Input
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="(none)"
-          />
-        </Field>
-        <Field label="Display name">
-          <Input
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="(none)"
-          />
-        </Field>
-        <Field label="Bot">
-          <select
-            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-            value={isBot}
-            onChange={(e) => setIsBot(e.target.value)}
-          >
-            <option value="">(unknown)</option>
-            <option value="false">no</option>
-            <option value="true">yes</option>
-          </select>
-        </Field>
-        {mutation.isError && (
-          <p className="text-xs text-destructive">
-            {(mutation.error as Error)?.message ?? "update failed"}
-          </p>
-        )}
-        <Button
-          size="sm"
-          disabled={readonly || mutation.isPending}
-          onClick={() => mutation.mutate()}
+    <div className="space-y-3">
+      <div className="text-xs text-muted-foreground">
+        <Badge variant="secondary">{user.platform}</Badge>{" "}
+        <code>{user.platformId}</code>
+      </div>
+      <Field label="Username">
+        <Input
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder="(none)"
+        />
+      </Field>
+      <Field label="Display name">
+        <Input
+          value={displayName}
+          onChange={(e) => setDisplayName(e.target.value)}
+          placeholder="(none)"
+        />
+      </Field>
+      <Field label="Bot">
+        <select
+          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+          value={isBot}
+          onChange={(e) => setIsBot(e.target.value)}
         >
-          {mutation.isPending ? "Saving…" : "Save"}
-        </Button>
-        <p className="text-xs text-muted-foreground">
-          Leave a field blank to clear it. Only changed fields are sent.
+          <option value="">(unknown)</option>
+          <option value="false">no</option>
+          <option value="true">yes</option>
+        </select>
+      </Field>
+      {mutation.isError && (
+        <p className="text-xs text-destructive">
+          {(mutation.error as Error)?.message ?? "update failed"}
         </p>
-      </CardContent>
-    </Card>
+      )}
+      <Button
+        size="sm"
+        disabled={readonly || mutation.isPending}
+        onClick={() => mutation.mutate()}
+      >
+        {mutation.isPending ? "Saving…" : "Save account"}
+      </Button>
+      <p className="text-xs text-muted-foreground">
+        Leave a field blank to clear it. Only changed fields are sent.
+      </p>
+    </div>
   );
 }
 
-function AccountPlaceEditor({
+function AccountPlaceFields({
   place,
-  onClose,
+  onSaved,
 }: {
   place: AccountPlaceInfo;
-  onClose: () => void;
+  onSaved: () => void;
 }) {
   const qc = useQueryClient();
   const readonly = useAuthStore((s) => s.me?.readonly ?? false);
@@ -151,87 +176,355 @@ function AccountPlaceEditor({
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["accounts"] });
       void qc.invalidateQueries({ queryKey: ["account-names"] });
-      onClose();
+      onSaved();
     },
   });
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center justify-between text-sm">
-          <span>Edit place</span>
-          <Button size="sm" variant="ghost" onClick={onClose}>
-            Close
-          </Button>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="text-xs text-muted-foreground">
-          <Badge variant="secondary">{place.platform}</Badge>{" "}
-          <code>{place.platformId}</code>
-        </div>
-        <Field label="Kind">
-          <Input
-            value={kind}
-            onChange={(e) => setKind(e.target.value)}
-            placeholder="(none)"
-          />
-        </Field>
-        <Field label="Name">
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="(none)"
-          />
-        </Field>
-        <Field label="Username">
-          <Input
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="(none)"
-          />
-        </Field>
-        <Field label="Parent platform id">
-          <Input
-            value={parentPlatformId}
-            onChange={(e) => setParentPlatformId(e.target.value)}
-            placeholder="(none)"
-          />
-        </Field>
-        {mutation.isError && (
-          <p className="text-xs text-destructive">
-            {(mutation.error as Error)?.message ?? "update failed"}
-          </p>
-        )}
-        <Button
-          size="sm"
-          disabled={readonly || mutation.isPending}
-          onClick={() => mutation.mutate()}
-        >
-          {mutation.isPending ? "Saving…" : "Save"}
-        </Button>
-        <p className="text-xs text-muted-foreground">
-          Leave a field blank to clear it. Only changed fields are sent.
+    <div className="space-y-3">
+      <div className="text-xs text-muted-foreground">
+        <Badge variant="secondary">{place.platform}</Badge>{" "}
+        <code>{place.platformId}</code>
+      </div>
+      <Field label="Kind">
+        <Input
+          value={kind}
+          onChange={(e) => setKind(e.target.value)}
+          placeholder="(none)"
+        />
+      </Field>
+      <Field label="Name">
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="(none)"
+        />
+      </Field>
+      <Field label="Username">
+        <Input
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder="(none)"
+        />
+      </Field>
+      <Field label="Parent platform id">
+        <Input
+          value={parentPlatformId}
+          onChange={(e) => setParentPlatformId(e.target.value)}
+          placeholder="(none)"
+        />
+      </Field>
+      {mutation.isError && (
+        <p className="text-xs text-destructive">
+          {(mutation.error as Error)?.message ?? "update failed"}
         </p>
-      </CardContent>
-    </Card>
+      )}
+      <Button
+        size="sm"
+        disabled={readonly || mutation.isPending}
+        onClick={() => mutation.mutate()}
+      >
+        {mutation.isPending ? "Saving…" : "Save account"}
+      </Button>
+      <p className="text-xs text-muted-foreground">
+        Leave a field blank to clear it. Only changed fields are sent.
+      </p>
+    </div>
   );
 }
 
-function Field({
-  label,
-  children,
+/**
+ * Restrictions that apply to a specific account (user or place), shown and
+ * editable inside the account modal. An "add restriction" form is auto-scoped
+ * to the account — no user/place picker needed.
+ */
+function AccountRestrictions({
+  kind,
+  ref_,
+  users,
+  places,
 }: {
-  label: string;
-  children: React.ReactNode;
+  kind: "user" | "place";
+  ref_: AccountRef;
+  users?: AccountUserInfo[];
+  places?: AccountPlaceInfo[];
 }) {
+  const qc = useQueryClient();
+  const readonly = useAuthStore((s) => s.me?.readonly ?? false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const bans = useQuery({
+    queryKey: ["restrictions", "ban"],
+    queryFn: () => api.listRestrictions("ban"),
+  });
+  const limits = useQuery({
+    queryKey: ["restrictions", "limit"],
+    queryFn: () => api.listRestrictions("limit"),
+  });
+
+  const applicable = useMemo(() => {
+    const all = [...(bans.data ?? []), ...(limits.data ?? [])];
+    return all
+      .filter((r) => appliesToAccount(r, kind, ref_))
+      .sort((a, b) => (a.rule.Type === b.rule.Type ? 0 : a.rule.Type === "ban" ? -1 : 1));
+  }, [bans.data, limits.data, kind, ref_]);
+
+  const remove = useMutation({
+    mutationFn: (id: string) => api.removeRestriction(id),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["restrictions"] }),
+  });
+
   return (
-    <label className="block space-y-1">
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium">Restrictions</span>
+        <Badge variant="secondary">{applicable.length}</Badge>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        All rules that apply to this {kind}: direct rules plus any{" "}
+        <code>{kind === "user" ? "any user" : "any place"}</code> wildcards.
+      </p>
+
+      {applicable.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No restrictions apply.</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {applicable.map((r) => {
+            const direct =
+              (kind === "user" && r.user != null) ||
+              (kind === "place" && r.place != null);
+            const other = kind === "user" ? r.place : r.user;
+            return (
+              <li
+                key={r.id}
+                className="flex items-center justify-between gap-2 rounded-md border px-2 py-1.5"
+              >
+                <div className="min-w-0">
+                  <Badge
+                    variant={r.rule.Type === "ban" ? "destructive" : "secondary"}
+                    className="mr-1.5"
+                  >
+                    {r.rule.Type}
+                  </Badge>
+                  <span className="text-sm">{restrictionDetail(r.rule)}</span>
+                  {!direct && (
+                    <span className="ml-1.5 text-xs text-muted-foreground">
+                      (wildcard{other ? ` · also scoped to ${kind === "user" ? "place" : "user"} ${refKey(other)}` : ""})
+                    </span>
+                  )}
+                </div>
+                <div className="flex shrink-0 gap-1">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={readonly}
+                    onClick={() =>
+                      setEditingId(editingId === r.id ? null : r.id)
+                    }
+                  >
+                    {editingId === r.id ? "Cancel" : "Edit"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    disabled={readonly || remove.isPending}
+                    onClick={() => {
+                      if (window.confirm("Delete this restriction?")) {
+                        remove.mutate(r.id);
+                      }
+                    }}
+                  >
+                    Delete
+                  </Button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {editingId &&
+        applicable.some((r) => r.id === editingId) &&
+        (() => {
+          const row = applicable.find((r) => r.id === editingId)!;
+          return (
+            <EditRestrictionInline
+              key={row.id}
+              row={row}
+              onDone={() => setEditingId(null)}
+            />
+          );
+        })()}
+
+      <AddRestrictionScoped kind={kind} ref_={ref_} users={users} places={places} />
+    </div>
+  );
+}
+
+function EditRestrictionInline({
+  row,
+  onDone,
+}: {
+  row: RestrictionInfo;
+  onDone: () => void;
+}) {
+  const qc = useQueryClient();
+  const readonly = useAuthStore((s) => s.me?.readonly ?? false);
+  const [f, setF] = useState<RuleFormState>(() =>
+    ruleFormFromRestriction(row),
+  );
+  const [error, setError] = useState<string | null>(null);
+  const set = (patch: Partial<RuleFormState>) =>
+    setF((prev) => ({ ...prev, ...patch }));
+
+  const save = useMutation({
+    mutationFn: () => {
+      const { rule, error: err } = buildRule(f);
+      if (!rule) throw new Error(err);
+      const body = {
+        user: row.user ?? undefined,
+        place: row.place ?? undefined,
+        rule,
+      };
+      return api.updateRestriction(row.id, body);
+    },
+    onMutate: () => setError(null),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["restrictions"] });
+      onDone();
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  return (
+    <div className="space-y-3 rounded-md border p-3">
       <span className="text-xs font-medium text-muted-foreground">
-        {label}
+        Edit rule
       </span>
-      {children}
-    </label>
+      <RestrictionRuleFields f={f} set={set} readonly={readonly} />
+      {error && <p className="text-xs text-destructive">{error}</p>}
+      <Button
+        size="sm"
+        disabled={readonly || save.isPending}
+        onClick={() => save.mutate()}
+      >
+        {save.isPending ? "Saving…" : "Save rule"}
+      </Button>
+    </div>
+  );
+}
+
+function AddRestrictionScoped({
+  kind,
+  ref_,
+  users,
+  places,
+}: {
+  kind: "user" | "place";
+  ref_: AccountRef;
+  users?: AccountUserInfo[];
+  places?: AccountPlaceInfo[];
+}) {
+  const qc = useQueryClient();
+  const readonly = useAuthStore((s) => s.me?.readonly ?? false);
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState<RuleFormState>(() => emptyRuleForm());
+  const otherKind = kind === "user" ? "place" : "user";
+  const [otherPlatform, setOtherPlatform] = useState<
+    "telegram" | "discord"
+  >(ref_.platform);
+  const [otherId, setOtherId] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const set = (patch: Partial<RuleFormState>) =>
+    setF((prev) => ({ ...prev, ...patch }));
+
+  const create = useMutation({
+    mutationFn: () => {
+      const { rule, error: err } = buildRule(f);
+      if (!rule) throw new Error(err);
+      const other = otherId.trim()
+        ? { platform: otherPlatform, id: otherId.trim() }
+        : undefined;
+      const user = kind === "user" ? ref_ : other;
+      const place = kind === "place" ? ref_ : other;
+      return api.createRestriction({ user, place, rule });
+    },
+    onMutate: () => setError(null),
+    onSuccess: () => {
+      setF(emptyRuleForm(f.ruleType));
+      setOtherId("");
+      void qc.invalidateQueries({ queryKey: ["restrictions"] });
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  return (
+    <div className="space-y-3 rounded-md border border-dashed p-3">
+      {!open ? (
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={readonly}
+          onClick={() => setOpen(true)}
+        >
+          Add restriction
+        </Button>
+      ) : (
+        <>
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-muted-foreground">
+              New restriction on this {kind}
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setOpen(false);
+                setError(null);
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+          <label className="block space-y-1">
+            <span className="text-xs text-muted-foreground">
+              Also scope to a {otherKind} (optional)
+            </span>
+            <div className="flex gap-1">
+              <select
+                value={otherPlatform}
+                onChange={(e) =>
+                  setOtherPlatform(e.target.value as "telegram" | "discord")
+                }
+                className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+              >
+                <option value="telegram">telegram</option>
+                <option value="discord">discord</option>
+              </select>
+              <div className="w-48">
+                <AccountAutocomplete
+                  platform={otherPlatform}
+                  users={otherKind === "user" ? users : undefined}
+                  places={otherKind === "place" ? places : undefined}
+                  kind={otherKind}
+                  value={otherId}
+                  onChange={setOtherId}
+                />
+              </div>
+            </div>
+          </label>
+          <RestrictionRuleFields f={f} set={set} readonly={readonly} />
+          {error && <p className="text-xs text-destructive">{error}</p>}
+          <Button
+            size="sm"
+            disabled={readonly || create.isPending}
+            onClick={() => create.mutate()}
+          >
+            {create.isPending ? "Creating…" : "Add"}
+          </Button>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -425,7 +718,7 @@ export function AccountsPage() {
           <p className="text-sm text-muted-foreground">
             End-users and chats/servers seen by the bots. Refreshed by bots on
             each message — metadata for inactive entities may be stale. Use
-            “Edit” to correct a row manually.
+            “Edit” to correct a row manually and manage its restrictions.
           </p>
         </CardHeader>
         <CardContent>
@@ -446,44 +739,89 @@ export function AccountsPage() {
             </Badge>
           </div>
 
-          <div
-            className={
-              selectedUser || selectedPlace
-                ? "grid gap-4 lg:grid-cols-[1fr_360px]"
-                : ""
-            }
-          >
-            <div>
-              {tab === "users" ? (
-                <DataTable
-                  columns={userColumns}
-                  data={users.data ?? []}
-                  emptyMessage="No users recorded yet."
-                />
-              ) : (
-                <DataTable
-                  columns={placeColumns}
-                  data={places.data ?? []}
-                  emptyMessage="No places recorded yet."
-                />
-              )}
-            </div>
-
-            {tab === "users" && selectedUser && (
-              <AccountUserEditor
-                user={selectedUser}
-                onClose={() => setSelectedUser(null)}
-              />
-            )}
-            {tab === "places" && selectedPlace && (
-              <AccountPlaceEditor
-                place={selectedPlace}
-                onClose={() => setSelectedPlace(null)}
-              />
-            )}
-          </div>
+          {tab === "users" ? (
+            <DataTable
+              columns={userColumns}
+              data={users.data ?? []}
+              emptyMessage="No users recorded yet."
+            />
+          ) : (
+            <DataTable
+              columns={placeColumns}
+              data={places.data ?? []}
+              emptyMessage="No places recorded yet."
+            />
+          )}
         </CardContent>
       </Card>
+
+      <Dialog
+        open={selectedUser != null}
+        onOpenChange={(o) => !o && setSelectedUser(null)}
+      >
+        <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+          {selectedUser && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Edit user</DialogTitle>
+                <DialogDescription>
+                  Update account metadata and manage restrictions that apply to
+                  this user.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-6 md:grid-cols-2">
+                <AccountUserFields
+                  user={selectedUser}
+                  onSaved={() => setSelectedUser(null)}
+                />
+                <AccountRestrictions
+                  kind="user"
+                  ref_={{
+                    platform: selectedUser.platform,
+                    id: selectedUser.platformId,
+                  }}
+                  users={users.data}
+                  places={places.data}
+                />
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={selectedPlace != null}
+        onOpenChange={(o) => !o && setSelectedPlace(null)}
+      >
+        <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+          {selectedPlace && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Edit place</DialogTitle>
+                <DialogDescription>
+                  Update account metadata and manage restrictions that apply to
+                  this place.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-6 md:grid-cols-2">
+                <AccountPlaceFields
+                  place={selectedPlace}
+                  onSaved={() => setSelectedPlace(null)}
+                />
+                <AccountRestrictions
+                  kind="place"
+                  ref_={{
+                    platform: selectedPlace.platform,
+                    id: selectedPlace.platformId,
+                  }}
+                  users={users.data}
+                  places={places.data}
+                />
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

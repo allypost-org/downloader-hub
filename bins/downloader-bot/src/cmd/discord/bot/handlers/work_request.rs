@@ -317,7 +317,8 @@ pub async fn process_work_request(
         debug!("Copied files to download directory");
     }
 
-    let max_bytes = DiscordBot::max_payload_bytes();
+    let max_bytes = u64::try_from(DiscordBot::max_payload_size().bytes())
+        .expect("max payload size must not be negative");
 
     let failed_files = send_attachment_groups(
         downloaded_files.iter().map(|(f, n)| (f, n.as_ref())),

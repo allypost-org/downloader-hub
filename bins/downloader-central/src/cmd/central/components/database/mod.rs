@@ -85,6 +85,17 @@ pub async fn run(config: DatabaseConfig) -> super::ComponentResult {
             .with_reset_retries_after(Some(FIVE_MINS)),
     ));
 
+    js.spawn(keep_running(
+        "Database::restrictions_watcher",
+        Box::new(|| async {
+            trace!("Starting restrictions watcher");
+            super::rpc::run_restrictions_watcher().await
+        }),
+        RetryConfig::new()
+            .with_retry_delays(RETRY_DELAYS.clone())
+            .with_reset_retries_after(Some(FIVE_MINS)),
+    ));
+
     if let Some(res) = js.join_next().await {
         let (name, outcome) = match res {
             Ok((name, Ok(()))) => (name, "exited unexpectedly"),

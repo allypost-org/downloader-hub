@@ -509,3 +509,212 @@ pub async fn central_parked_workers(
         }
     }
 }
+
+#[derive(Debug, Deserialize)]
+pub struct ListRestrictionsQuery {
+    #[serde(rename = "type")]
+    pub kind: Option<String>,
+}
+
+pub async fn list_restrictions(
+    _session: AdminSession,
+    Query(q): Query<ListRestrictionsQuery>,
+) -> impl IntoResponse {
+    match q.kind.as_deref() {
+        Some("ban") => match Database::global().restrictions_list_bans().await {
+            Ok(rows) => V1Response::ok(rows),
+            Err(e) => {
+                tracing::error!(?e, "list_restrictions(ban) failed");
+                V1Response::<Arc<[app_database::entity::restrictions::RestrictionRow]>>::err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "database error",
+                )
+            }
+        },
+        Some("limit") => match Database::global().restrictions_list_limits().await {
+            Ok(rows) => V1Response::ok(rows),
+            Err(e) => {
+                tracing::error!(?e, "list_restrictions(limit) failed");
+                V1Response::<Arc<[app_database::entity::restrictions::RestrictionRow]>>::err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "database error",
+                )
+            }
+        },
+        _ => V1Response::<Arc<[app_database::entity::restrictions::RestrictionRow]>>::err(
+            StatusCode::BAD_REQUEST,
+            "invalid or missing `type` (expected `ban` or `limit`)",
+        ),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AccountRefBody {
+    pub platform: app_database::entity::accounts::Platform,
+    pub id: String,
+}
+
+impl AccountRefBody {
+    fn to_user_ref(&self) -> app_database::entity::accounts::AccountUserRef {
+        app_database::entity::accounts::AccountUserRef {
+            platform: self.platform,
+            id: self.id.clone(),
+        }
+    }
+    fn to_place_ref(&self) -> app_database::entity::accounts::AccountPlaceRef {
+        app_database::entity::accounts::AccountPlaceRef {
+            platform: self.platform,
+            id: self.id.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "Type", rename_all = "lowercase")]
+pub enum RuleBody {
+    Ban {
+        reason: String,
+        ends_at: Option<String>,
+        duration: Option<String>,
+    },
+    Limit {
+        count: u64,
+        timeframe: String,
+    },
+}
+
+fn parse_span(s: &str) -> Result<jiff::Span, String> {
+    jiff::fmt::friendly::SpanParser::new()
+        .parse_span(s)
+        .map_err(|e| e.to_string())
+}
+
+fn rule_body_to_rule(body: RuleBody) -> Result<app_database::entity::restrictions::Rule, String> {
+    match body {
+        RuleBody::Ban {
+            reason,
+            ends_at,
+            duration,
+        } => {
+            let ends_at = if let Some(dur) = duration {
+                let span = parse_span(&dur)?;
+                Some(
+                    jiff::Timestamp::now()
+                        .checked_add(span)
+                        .map_err(|e| e.to_string())?,
+                )
+            } else if let Some(ts) = ends_at {
+                Some(ts.parse::<jiff::Timestamp>().map_err(|e| e.to_string())?)
+            } else {
+                None
+            };
+            Ok(app_database::entity::restrictions::Rule::Ban { reason, ends_at })
+        }
+        RuleBody::Limit { count, timeframe } => {
+            let timeframe = parse_span(&timeframe)?;
+            Ok(app_database::entity::restrictions::Rule::Limit { count, timeframe })
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateRestrictionBody {
+    pub user: Option<AccountRefBody>,
+    pub place: Option<AccountRefBody>,
+    pub rule: RuleBody,
+}
+
+pub async fn create_restriction(
+    _session: WriteSession,
+    Json(body): Json<CreateRestrictionBody>,
+) -> impl IntoResponse {
+    if body.user.is_none() && body.place.is_none() {
+        return V1Response::<app_database::api::restrictions::RestrictionCreateInfo>::err(
+            StatusCode::BAD_REQUEST,
+            "at least one of `user` or `place` is required",
+        );
+    }
+    let rule = match rule_body_to_rule(body.rule) {
+        Ok(r) => r,
+        Err(e) => {
+            return V1Response::<app_database::api::restrictions::RestrictionCreateInfo>::err(
+                StatusCode::BAD_REQUEST,
+                &e,
+            );
+        }
+    };
+    let user_ref = body.user.as_ref().map(AccountRefBody::to_user_ref);
+    let place_ref = body.place.as_ref().map(AccountRefBody::to_place_ref);
+    match Database::global()
+        .restriction_create(user_ref.as_ref(), place_ref.as_ref(), &rule)
+        .await
+    {
+        Ok(info) => V1Response::ok(info),
+        Err(e) => {
+            tracing::error!(?e, "create_restriction failed");
+            V1Response::err(StatusCode::INTERNAL_SERVER_ERROR, "database error")
+        }
+    }
+}
+
+pub async fn remove_restriction(
+    _session: WriteSession,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match Database::global()
+        .restriction_remove(Arc::from(id.as_str()))
+        .await
+    {
+        Ok(app_database::api::restrictions::RestrictionRemoveResult::Ok) => {
+            V1Response::ok(serde_json::json!({ "removed": true }))
+        }
+        Ok(app_database::api::restrictions::RestrictionRemoveResult::NotFound) => {
+            V1Response::err(StatusCode::NOT_FOUND, "restriction not found")
+        }
+        Err(e) => {
+            tracing::error!(?e, "remove_restriction failed");
+            V1Response::err(StatusCode::INTERNAL_SERVER_ERROR, "database error")
+        }
+    }
+}
+
+pub async fn replace_restriction(
+    _session: WriteSession,
+    Path(id): Path<String>,
+    Json(body): Json<CreateRestrictionBody>,
+) -> impl IntoResponse {
+    if body.user.is_none() && body.place.is_none() {
+        return V1Response::<serde_json::Value>::err(
+            StatusCode::BAD_REQUEST,
+            "at least one of `user` or `place` is required",
+        );
+    }
+    let rule = match rule_body_to_rule(body.rule) {
+        Ok(r) => r,
+        Err(e) => {
+            return V1Response::<serde_json::Value>::err(StatusCode::BAD_REQUEST, &e);
+        }
+    };
+    let user_ref = body.user.as_ref().map(AccountRefBody::to_user_ref);
+    let place_ref = body.place.as_ref().map(AccountRefBody::to_place_ref);
+    match Database::global()
+        .restriction_replace(
+            Arc::from(id.as_str()),
+            user_ref.as_ref(),
+            place_ref.as_ref(),
+            &rule,
+        )
+        .await
+    {
+        Ok(app_database::api::restrictions::RestrictionRemoveResult::Ok) => {
+            V1Response::ok(serde_json::json!({ "updated": true }))
+        }
+        Ok(app_database::api::restrictions::RestrictionRemoveResult::NotFound) => {
+            V1Response::err(StatusCode::NOT_FOUND, "restriction not found")
+        }
+        Err(e) => {
+            tracing::error!(?e, "replace_restriction failed");
+            V1Response::err(StatusCode::INTERNAL_SERVER_ERROR, "database error")
+        }
+    }
+}

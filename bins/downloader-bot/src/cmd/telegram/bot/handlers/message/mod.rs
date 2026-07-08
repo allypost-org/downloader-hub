@@ -84,9 +84,9 @@ pub async fn handle_message(msg: &TelegramMessage) -> ResponseResult<()> {
             RequestInfo::DownloadAndFix({
                 let file_url: FileUrl = file_url.into();
 
-                FileReference::url(file_url.with_max_filesize(Some(
-                    TelegramBot::max_payload_size().bytes().cast_unsigned(),
-                )))
+                FileReference::url(
+                    file_url.with_max_filesize(Some(TelegramBot::max_payload_size())),
+                )
             }),
             url_status_message.to_metadata(),
             Some(format!("tg-{}-{}-{}", msg.chat.id, msg.id, i)),
@@ -96,6 +96,21 @@ pub async fn handle_message(msg: &TelegramMessage) -> ResponseResult<()> {
         .await
         {
             Ok(CreateResult::Ok(result)) => result,
+            Ok(CreateResult::Banned { reason }) => {
+                url_status_message.delete_message().await;
+                status_message
+                    .update_message(&format!("You are banned: {reason}"))
+                    .await;
+                return Ok(());
+            }
+            Ok(res @ CreateResult::RateLimited { .. }) => {
+                let msg = res
+                    .rate_limit_message()
+                    .unwrap_or_else(|| "Rate limit exceeded. Try again later.".to_string());
+                url_status_message.delete_message().await;
+                status_message.update_message(&msg).await;
+                return Ok(());
+            }
             Ok(_) => {
                 url_status_message
                     .update_message("Failed to add URL to queue: central error")

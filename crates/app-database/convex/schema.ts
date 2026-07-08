@@ -99,6 +99,28 @@ export const accountPlace = {
   lastSeen: v.int64(),
 };
 
+export const restrictionId = "downloader_hub_restrictions" as const;
+
+export const restrictionBan = {
+  Type: v.literal("ban"),
+  reason: v.string(),
+  // absent = indefinite; else epoch-ms when the ban ends.
+  endsAt: v.optional(v.int64()),
+};
+
+export const restrictionLimit = {
+  Type: v.literal("limit"),
+  count: v.int64(),
+  // window length in epoch-ms (e.g. 1 hour = 3_600_000).
+  timeframeMs: v.int64(),
+};
+
+export const restriction = {
+  user: v.optional(accountUserRef),
+  place: v.optional(accountPlaceRef),
+  rule: v.union(v.object(restrictionBan), v.object(restrictionLimit)),
+};
+
 export const outboxId = "downloader_hub_outbox" as const;
 export const outbox = {
   message: v.union(v.bytes(), v.string()),
@@ -141,6 +163,11 @@ export default defineSchema(
       "platform",
       "platformId",
     ]),
+
+    [restrictionId]: defineTable(restriction)
+      .index("by_rule_type", ["rule.Type"])
+      .index("by_user", ["user"])
+      .index("by_place", ["place"]),
   },
   {
     schemaValidation: true,

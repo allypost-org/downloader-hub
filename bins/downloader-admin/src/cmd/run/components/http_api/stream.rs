@@ -199,7 +199,11 @@ async fn run_account_names_watch(tx: watch::Sender<serde_json::Value>) {
 
 /// Pushes a tiny ping whenever the latest `lastModified` among all requests
 /// advances. The frontend uses this as a signal to invalidate its paginated
-/// request-list queries and refetch via HTTP. Carries no row data.
+/// request lists and refetch via HTTP. Carries no row data.
+///
+/// Convex re-emits the watch on internal re-evaluations even when the value is
+/// unchanged, so emissions are deduplicated on the `lastModified` value to
+/// avoid hammering the client with refetch pings.
 async fn run_requests_changed_watch(tx: watch::Sender<serde_json::Value>) {
     let mut stream = match Database::global().requests_watch_latest_change().await {
         Ok(s) => s,
@@ -209,9 +213,14 @@ async fn run_requests_changed_watch(tx: watch::Sender<serde_json::Value>) {
         }
     };
     debug!("started requests-changed watch");
+    let mut last: Option<Option<u64>> = None;
     while let Some(item) = stream.next().await {
         match item {
             Ok(change) => {
+                if last == Some(change.last_modified) {
+                    continue;
+                }
+                last = Some(change.last_modified);
                 let value = change.last_modified.map_or(serde_json::Value::Null, |ts| {
                     serde_json::to_value(ts).unwrap_or(serde_json::Value::Null)
                 });

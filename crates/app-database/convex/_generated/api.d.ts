@@ -16,6 +16,7 @@ import type * as helpers_auth from "../helpers/auth.js";
 import type * as lib_requestCounts from "../lib/requestCounts.js";
 import type * as lib_triggers from "../lib/triggers.js";
 import type * as requests from "../requests.js";
+import type * as restrictions from "../restrictions.js";
 
 import type {
   ApiFromModules,
@@ -32,6 +33,7 @@ declare const fullApi: ApiFromModules<{
   "lib/requestCounts": typeof lib_requestCounts;
   "lib/triggers": typeof lib_triggers;
   requests: typeof requests;
+  restrictions: typeof restrictions;
 }>;
 
 /**

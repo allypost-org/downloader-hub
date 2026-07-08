@@ -1008,14 +1008,16 @@ export const getByStatus = query({
 /// monotonically whenever any request is mutated.
 export const getLatestChange = query({
   args: {},
-  returns: v.union(v.int64(), v.null()),
+  returns: v.object({
+    lastModified: v.union(v.int64(), v.null()),
+  }),
   handler: async (ctx) => {
     const row = await ctx.db
       .query(requestsId)
       .withIndex("by_last_modified")
       .order("desc")
       .first();
-    return row ? row.lastModified : null;
+    return { lastModified: row ? row.lastModified : null };
   },
 });
 

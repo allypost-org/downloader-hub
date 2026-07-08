@@ -20,6 +20,7 @@ use crate::{
 };
 
 #[tracing::instrument(name = "discord-download", skip(ctx, msg, urls))]
+#[allow(clippy::too_many_lines)]
 pub async fn handle_download_request(ctx: &Context, msg: &Message, mut urls: Vec<Url>) {
     info!(url_count = urls.len(), "Adding download request to queue");
 
@@ -49,7 +50,6 @@ pub async fn handle_download_request(ctx: &Context, msg: &Message, mut urls: Vec
     }
     let user_ref = user_snapshot.map(|(_, r)| r);
 
-    let max_bytes = DiscordBot::max_payload_bytes();
     let mut added_some = false;
 
     for (i, url) in urls.into_iter().enumerate() {
@@ -79,7 +79,7 @@ pub async fn handle_download_request(ctx: &Context, msg: &Message, mut urls: Vec
         }
 
         let file_url: FileUrl = url.into();
-        let file_url = file_url.with_max_filesize(Some(max_bytes));
+        let file_url = file_url.with_max_filesize(Some(DiscordBot::max_payload_size()));
         let file_ref = FileReference::url(file_url);
 
         let result = match RpcClient::work_request_create(
@@ -92,6 +92,21 @@ pub async fn handle_download_request(ctx: &Context, msg: &Message, mut urls: Vec
         .await
         {
             Ok(CreateResult::Ok(result)) => result,
+            Ok(CreateResult::Banned { reason }) => {
+                url_status_message.delete_message().await;
+                status_message
+                    .update_message(&format!("You are banned: {reason}"))
+                    .await;
+                return;
+            }
+            Ok(res @ CreateResult::RateLimited { .. }) => {
+                let msg = res
+                    .rate_limit_message()
+                    .unwrap_or_else(|| "Rate limit exceeded. Try again later.".to_string());
+                url_status_message.delete_message().await;
+                status_message.update_message(&msg).await;
+                return;
+            }
             Ok(_) => {
                 url_status_message
                     .update_message("Failed to add URL to queue: central error")
