@@ -29,6 +29,11 @@ pub struct Config {
     #[clap(long, env = "DOWNLOADER_HUB_LOG_FILE_FORMAT", default_value = "plain")]
     pub log_file_format: LogFormat,
 
+    /// Log level for the log file (when `--log-file` is set).
+    /// If not set, falls back to `DOWNLOADER_HUB_LOG_FILE_LEVEL` or `DOWNLOADER_HUB_LOG_LEVEL`.
+    #[clap(long)]
+    pub log_file_level: Option<String>,
+
     #[clap(subcommand)]
     #[validate(nested)]
     pub cmd: CmdConfig,

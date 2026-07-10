@@ -9,9 +9,7 @@ use std::{
 use app_config::LogFormat;
 use tracing::{Level, debug, trace, warn};
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{
-    EnvFilter, Layer, Registry, filter::Directive, fmt, prelude::*, reload::Handle,
-};
+use tracing_subscriber::{EnvFilter, Layer, Registry, filter::Directive, fmt, prelude::*};
 
 use crate::maybe_writer::MaybeFileWriter;
 
@@ -38,7 +36,8 @@ impl ReloadBridge {
     }
 }
 
-static RELOAD_HANDLE: OnceLock<ReloadBridge> = OnceLock::new();
+static CONSOLE_RELOAD_HANDLE: OnceLock<ReloadBridge> = OnceLock::new();
+static FILE_RELOAD_HANDLE: OnceLock<ReloadBridge> = OnceLock::new();
 static FILE_GUARD: OnceLock<WorkerGuard> = OnceLock::new();
 
 pub const COMPONENT_LEVELS: &[(&str, Level)] = &[
@@ -51,6 +50,7 @@ pub const COMPONENT_LEVELS: &[(&str, Level)] = &[
 #[derive(Debug, Clone)]
 pub struct LogOptions {
     log_level: Option<Level>,
+    file_log_level: Option<Level>,
     log_file: Option<PathBuf>,
     console_format: LogFormat,
     file_format: LogFormat,
@@ -85,12 +85,19 @@ impl LogOptions {
         self.log_level = log_level;
         self
     }
+
+    #[must_use]
+    pub const fn with_file_log_level(mut self, file_log_level: Option<Level>) -> Self {
+        self.file_log_level = file_log_level;
+        self
+    }
 }
 
 impl Default for LogOptions {
     fn default() -> Self {
         Self {
             log_level: Some(Level::INFO),
+            file_log_level: None,
             log_file: None,
             console_format: LogFormat::Pretty,
             file_format: LogFormat::Plain,
@@ -107,24 +114,25 @@ pub fn init() {
 }
 
 pub fn init_with_options(options: LogOptions) {
-    let levels = options.log_level.map_or_else(
-        || COMPONENT_LEVELS.to_vec(),
-        |level| {
-            COMPONENT_LEVELS
-                .iter()
-                .map(|(k, _v)| (k.to_owned(), level))
-                .collect::<Vec<_>>()
-        },
-    );
+    let levels = build_levels(options.log_level);
+    let file_levels = build_levels(options.file_log_level.or(options.log_level));
 
-    init_with(levels, options);
+    init_with(levels, file_levels, options);
 }
 
-pub fn init_with<T>(levels: T, options: LogOptions)
+pub fn init_with<T, U>(levels: T, file_levels: U, options: LogOptions)
 where
     T: IntoIterator<Item = (&'static str, Level)>,
+    U: IntoIterator<Item = (&'static str, Level)>,
 {
-    let env_filter = build_env_filter(levels);
+    let console_env_filter =
+        build_env_filter(levels, options.log_level, "DOWNLOADER_HUB_LOG_LEVEL", None);
+    let file_env_filter = build_env_filter(
+        file_levels,
+        options.file_log_level.or(options.log_level),
+        "DOWNLOADER_HUB_LOG_FILE_LEVEL",
+        Some("DOWNLOADER_HUB_LOG_LEVEL"),
+    );
     let writer_fn = build_file_writer(options.log_file);
 
     match options.console_format {
@@ -142,7 +150,8 @@ where
                         .with_ansi(false)
                         .fmt_fields(JsonFileFields)
                         .with_writer(writer_fn),
-                    env_filter,
+                    console_env_filter,
+                    file_env_filter,
                 ),
                 LogFormat::Plain | LogFormat::Pretty => finish_init(
                     stderr_layer,
@@ -150,7 +159,8 @@ where
                         .with_ansi(false)
                         .fmt_fields(FileFields)
                         .with_writer(writer_fn),
-                    env_filter,
+                    console_env_filter,
+                    file_env_filter,
                 ),
             }
         }
@@ -167,7 +177,8 @@ where
                         .with_ansi(false)
                         .fmt_fields(JsonFileFields)
                         .with_writer(writer_fn),
-                    env_filter,
+                    console_env_filter,
+                    file_env_filter,
                 ),
                 LogFormat::Plain | LogFormat::Pretty => finish_init(
                     stderr_layer,
@@ -175,7 +186,8 @@ where
                         .with_ansi(false)
                         .fmt_fields(FileFields)
                         .with_writer(writer_fn),
-                    env_filter,
+                    console_env_filter,
+                    file_env_filter,
                 ),
             }
         }
@@ -192,7 +204,8 @@ where
                         .with_ansi(false)
                         .fmt_fields(JsonFileFields)
                         .with_writer(writer_fn),
-                    env_filter,
+                    console_env_filter,
+                    file_env_filter,
                 ),
                 LogFormat::Plain | LogFormat::Pretty => finish_init(
                     stderr_layer,
@@ -200,57 +213,109 @@ where
                         .with_ansi(false)
                         .fmt_fields(FileFields)
                         .with_writer(writer_fn),
-                    env_filter,
+                    console_env_filter,
+                    file_env_filter,
                 ),
             }
         }
     }
 }
 
-fn finish_init<S, F>(stderr_layer: S, file_layer: F, env_filter: EnvFilter)
-where
+fn finish_init<S, F>(
+    stderr_layer: S,
+    file_layer: F,
+    console_filter: EnvFilter,
+    file_filter: EnvFilter,
+) where
     S: Layer<Registry> + Send + Sync + 'static,
-    F: Layer<tracing_subscriber::layer::Layered<S, Registry>> + Send + Sync + 'static,
+    F: Layer<
+            tracing_subscriber::layer::Layered<
+                tracing_subscriber::filter::Filtered<
+                    S,
+                    tracing_subscriber::reload::Layer<EnvFilter, Registry>,
+                    Registry,
+                >,
+                Registry,
+            >,
+        > + Send
+        + Sync
+        + 'static,
 {
-    let (filter_layer, reload_handle) = tracing_subscriber::reload::Layer::new(env_filter);
+    let (console_filter, console_handle) = tracing_subscriber::reload::Layer::new(console_filter);
+    let stderr_filtered = stderr_layer.with_filter(console_filter);
+
+    let (file_filter, file_handle) = tracing_subscriber::reload::Layer::new(file_filter);
+    let file_filtered = file_layer.with_filter(file_filter);
+
+    let console_modify = console_handle.clone();
+    let file_modify = file_handle.clone();
 
     assert!(
-        store_reload_handle(reload_handle),
+        store_reload_handle(
+            &CONSOLE_RELOAD_HANDLE,
+            Box::new(move |filter| {
+                console_modify
+                    .modify(|current| *current = filter)
+                    .map_err(|e| format!("Failed to set log level: {e:?}"))
+            }),
+            Box::new(move || {
+                console_handle
+                    .clone_current()
+                    .ok_or_else(|| "Failed to clone current log level".to_string())
+            }),
+        ),
+        "Logger was already initialized"
+    );
+    assert!(
+        store_reload_handle(
+            &FILE_RELOAD_HANDLE,
+            Box::new(move |filter| {
+                file_modify
+                    .modify(|current| *current = filter)
+                    .map_err(|e| format!("Failed to set log level: {e:?}"))
+            }),
+            Box::new(move || {
+                file_handle
+                    .clone_current()
+                    .ok_or_else(|| "Failed to clone current log level".to_string())
+            }),
+        ),
         "Logger was already initialized"
     );
 
     tracing_subscriber::registry()
-        .with(stderr_layer)
-        .with(file_layer)
-        .with(filter_layer)
+        .with(stderr_filtered)
+        .with(file_filtered)
         .try_init()
         .expect("setting default subscriber failed");
 }
 
-fn store_reload_handle<S>(reload_handle: Handle<EnvFilter, S>) -> bool
-where
-    S: Send + Sync + 'static,
-{
-    let modify_handle = reload_handle.clone();
-    let current_handle = reload_handle;
-
-    RELOAD_HANDLE
-        .set(ReloadBridge {
-            apply: Box::new(move |filter| {
-                modify_handle
-                    .modify(|current| *current = filter)
-                    .map_err(|e| format!("Failed to set log level: {e:?}"))
-            }),
-            current: Box::new(move || {
-                current_handle
-                    .clone_current()
-                    .ok_or_else(|| "Failed to clone current log level".to_string())
-            }),
-        })
-        .is_ok()
+fn store_reload_handle(
+    cell: &OnceLock<ReloadBridge>,
+    apply: Box<dyn Fn(EnvFilter) -> Result<(), String> + Send + Sync>,
+    current: Box<dyn Fn() -> Result<EnvFilter, String> + Send + Sync>,
+) -> bool {
+    cell.set(ReloadBridge { apply, current }).is_ok()
 }
 
-fn build_env_filter<T>(levels: T) -> EnvFilter
+fn build_levels(level: Option<Level>) -> Vec<(&'static str, Level)> {
+    level.map_or_else(
+        || COMPONENT_LEVELS.to_vec(),
+        |level| {
+            COMPONENT_LEVELS
+                .iter()
+                .map(|(k, _v)| (k.to_owned(), level))
+                .collect::<Vec<_>>()
+        },
+    )
+}
+
+fn build_env_filter<T>(
+    levels: T,
+    base_level: Option<Level>,
+    env_var: &str,
+    fallback_env_var: Option<&str>,
+) -> EnvFilter
 where
     T: IntoIterator<Item = (&'static str, Level)>,
 {
@@ -263,14 +328,23 @@ where
                 format!("{}={}", k, v)
             }
         })
-        .fold(String::new(), |acc, a| format!("{},{}", acc, a));
+        .collect::<Vec<_>>()
+        .join(",");
 
-    let mut base_level = EnvFilter::builder()
-        .with_default_directive(Level::INFO.into())
+    let default_directive = base_level.unwrap_or(Level::INFO).into();
+
+    let mut base_filter = EnvFilter::builder()
+        .with_default_directive(default_directive)
         .parse_lossy(default_levels);
 
-    let env_directives = env::var("DOWNLOADER_HUB_LOG_LEVEL")
-        .unwrap_or_default()
+    let env_value = env::var(env_var).unwrap_or_default();
+    let env_value = if env_value.is_empty() {
+        fallback_env_var.map_or_else(String::new, |var| env::var(var).unwrap_or_default())
+    } else {
+        env_value
+    };
+
+    let env_directives = env_value
         .split(',')
         .filter(|s| !s.is_empty())
         .filter_map(|s| match s.parse() {
@@ -283,10 +357,10 @@ where
         .collect::<Vec<Directive>>();
 
     for d in env_directives {
-        base_level = base_level.add_directive(d);
+        base_filter = base_filter.add_directive(d);
     }
 
-    base_level
+    base_filter
 }
 
 fn build_file_writer(log_file: Option<PathBuf>) -> FileWriterFn {
@@ -324,7 +398,25 @@ fn build_file_writer(log_file: Option<PathBuf>) -> FileWriterFn {
 }
 
 pub fn set_log_level(log_level: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let mut base_level = EnvFilter::builder()
+    set_filter(
+        CONSOLE_RELOAD_HANDLE
+            .get()
+            .expect("Logger was not initialized"),
+        log_level,
+    )
+}
+
+pub fn set_file_log_level(log_level: &str) -> Result<(), Box<dyn std::error::Error>> {
+    set_filter(
+        FILE_RELOAD_HANDLE
+            .get()
+            .expect("Logger was not initialized"),
+        log_level,
+    )
+}
+
+fn set_filter(handle: &ReloadBridge, log_level: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let mut base_filter = EnvFilter::builder()
         .with_default_directive(Level::INFO.into())
         .parse_lossy("info");
 
@@ -341,17 +433,33 @@ pub fn set_log_level(log_level: &str) -> Result<(), Box<dyn std::error::Error>> 
         .collect::<Vec<Directive>>();
 
     for d in set_directives {
-        base_level = base_level.add_directive(d);
+        base_filter = base_filter.add_directive(d);
     }
 
-    let reload_handle = RELOAD_HANDLE.get().expect("Logger was not initialized");
-
-    reload_handle
-        .set_filter(base_level)
+    handle
+        .set_filter(base_filter)
         .map_err(std::convert::Into::into)
 }
 
 pub fn update_log_level(log_level: &str) -> Result<(), Box<dyn std::error::Error>> {
+    update_filter(
+        CONSOLE_RELOAD_HANDLE
+            .get()
+            .expect("Logger was not initialized"),
+        log_level,
+    )
+}
+
+pub fn update_file_log_level(log_level: &str) -> Result<(), Box<dyn std::error::Error>> {
+    update_filter(
+        FILE_RELOAD_HANDLE
+            .get()
+            .expect("Logger was not initialized"),
+        log_level,
+    )
+}
+
+fn update_filter(handle: &ReloadBridge, log_level: &str) -> Result<(), Box<dyn std::error::Error>> {
     debug!(?log_level, "Updating log level");
 
     let default_levels = COMPONENT_LEVELS.iter().map(|(k, v)| {
@@ -362,11 +470,7 @@ pub fn update_log_level(log_level: &str) -> Result<(), Box<dyn std::error::Error
         }
     });
 
-    let current_levels = RELOAD_HANDLE
-        .get()
-        .expect("Logger was not initialized")
-        .current_filter()?
-        .to_string();
+    let current_levels = handle.current_filter()?.to_string();
 
     trace!(?current_levels, "Current log levels");
 
@@ -384,5 +488,5 @@ pub fn update_log_level(log_level: &str) -> Result<(), Box<dyn std::error::Error
 
     trace!(?levels, "New log levels");
 
-    set_log_level(&levels)
+    set_filter(handle, &levels)
 }
