@@ -50,7 +50,7 @@ pub struct FileUrl {
     #[serde(default, rename = "h")]
     pub headers: Vec<(String, String)>,
 
-    #[serde(default, rename = "fsm", skip_serializing_if = "Option::is_none")]
+    #[serde(default, with = "crate::helpers::serde::size::option", rename = "fsm")]
     pub max_filesize: Option<size::Size>,
 }
 

@@ -15,7 +15,7 @@ use app_peer_comms::{
         targeted::{TargetedTicket, TicketTarget},
     },
 };
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::peering::rpc::RpcClient;
 
@@ -87,6 +87,9 @@ pub async fn init_peering_endpoint(
                 tokio::time::sleep(Duration::from_millis(30_000 + jitter)).await;
                 if let Err(e) = RpcClient::heartbeat().await {
                     debug!(?e, "heartbeat failed");
+                    if let Err(re) = reconnect().await {
+                        warn!(?re, "reconnect failed after heartbeat failure");
+                    }
                 }
             }
         });

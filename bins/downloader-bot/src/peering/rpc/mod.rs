@@ -120,15 +120,28 @@ impl RpcClient {
     where
         T: Into<RequestInfo>,
     {
-        Self::client()
-            .rpc(request::WorkRequestMake {
-                info: info.into(),
-                metadata,
-                idempotency_key,
-                ordered_by,
-                ordered_in,
-            })
-            .await
+        let req = request::WorkRequestMake {
+            info: info.into(),
+            metadata,
+            idempotency_key,
+            ordered_by,
+            ordered_in,
+        };
+
+        match Self::client().rpc(req.clone()).await {
+            Ok(res) => Ok(res),
+            Err(e) => {
+                tracing::warn!(
+                    ?e,
+                    "work_request_create failed; reconnecting and retrying once"
+                );
+                if let Err(re) = crate::peering::reconnect().await {
+                    tracing::warn!(?re, "reconnect failed during work_request_create retry");
+                    return Err(e);
+                }
+                Self::client().rpc(req).await
+            }
+        }
     }
 
     pub async fn accounts_upsert(
