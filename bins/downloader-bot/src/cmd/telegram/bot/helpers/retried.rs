@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use teloxide::{RequestError, types::ChatId};
 use tracing::{debug, trace};
 
@@ -19,7 +21,7 @@ where
         };
         match err {
             RequestError::RetryAfter(secs) => {
-                let dur = secs.duration();
+                let dur = secs.duration().min(Duration::from_mins(1));
                 debug!(
                     ?dur,
                     "Telegram requested we wait for a bit before retrying send"
