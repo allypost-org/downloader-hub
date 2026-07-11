@@ -21,12 +21,14 @@ where
         };
         match err {
             RequestError::RetryAfter(secs) => {
-                let dur = secs.duration().min(Duration::from_mins(1));
+                let from_api = secs.duration();
+                let sleep_for = from_api.min(Duration::from_mins(1));
                 debug!(
-                    ?dur,
+                    ?from_api,
+                    ?sleep_for,
                     "Telegram requested we wait for a bit before retrying send"
                 );
-                tokio::time::sleep(dur).await;
+                tokio::time::sleep(sleep_for).await;
                 trace!("Done sleeping");
             }
             RequestError::MigrateToChatId(new_chat_id) => {

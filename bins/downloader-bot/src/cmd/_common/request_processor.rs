@@ -278,6 +278,7 @@ where
                     }
                     // waitingForRequester: claim a delivery attempt.
                     match claim_and_deliver(
+                        rx,
                         request_id.clone(),
                         platform,
                         is_recovery,
@@ -357,11 +358,68 @@ enum ClaimOutcome {
     Reconnect,
 }
 
+#[derive(Debug)]
+enum DeliveryAbort {
+    Failed(String),
+    Unavailable,
+}
+
+/// While a delivery attempt runs, the main watch loop cannot consume stream
+/// events. Monitor the stream concurrently so admin cancel / terminal states
+/// abort in-flight Telegram sends (and other delivery work) promptly.
+async fn watch_for_delivery_abort(rx: &mut Receiver<WorkRequestWatchEvent>) -> DeliveryAbort {
+    loop {
+        match rx.recv().await {
+            Ok(Some(WorkRequestWatchEvent::Request(req))) => match req.status() {
+                WorkRequestStatus::Failed { reason, .. } => {
+                    return DeliveryAbort::Failed(reason.clone());
+                }
+                WorkRequestStatus::Done { .. } => return DeliveryAbort::Unavailable,
+                _ => {}
+            },
+            Ok(Some(WorkRequestWatchEvent::Unavailable))
+            | Ok(None)
+            | Err(_) => return DeliveryAbort::Unavailable,
+            Ok(Some(_)) => {}
+        }
+    }
+}
+
+async fn abort_claimed_delivery<P>(
+    request_id: Arc<str>,
+    attempt: Arc<str>,
+    platform: &mut P,
+    lease_deadline: Instant,
+    abort: DeliveryAbort,
+) where
+    P: PlatformDelivery,
+{
+    info!(
+        ?request_id,
+        ?abort,
+        "delivery aborted while request left waiting state"
+    );
+    if let Err(e) = release_delivery(request_id, attempt, lease_deadline).await {
+        warn!(?e, "failed to release delivery after abort");
+    }
+    match abort {
+        DeliveryAbort::Failed(reason) => {
+            platform
+                .update_status_message(&format!("Request failed: {reason}"))
+                .await;
+        }
+        DeliveryAbort::Unavailable => {
+            platform.delete_status_message().await;
+        }
+    }
+}
+
 /// Call `WorkRequestAck`, and on `Claimed` run the delivery operation under
 /// the shorter-than-lease timeout, then finish. On release/timeout, stay
 /// subscribed (return Continue) so the watch picks up the restored waiting
 /// state and retries with backoff.
 async fn claim_and_deliver<P>(
+    rx: &mut Receiver<WorkRequestWatchEvent>,
     request_id: Arc<str>,
     platform: &mut P,
     is_recovery: bool,
@@ -392,12 +450,28 @@ where
             let operation_deadline = lease_started_at + DELIVERY_OPERATION_TIMEOUT;
             let lease_deadline = lease_started_at + DELIVERY_LEASE_TIMEOUT;
 
-            match timeout_at(
+            let download = timeout_at(
                 operation_deadline,
                 download_and_deliver(request_id.clone(), files, platform),
-            )
-            .await
-            {
+            );
+
+            let download_result = tokio::select! {
+                biased;
+                abort = watch_for_delivery_abort(rx) => {
+                    abort_claimed_delivery(
+                        request_id.clone(),
+                        attempt.clone(),
+                        platform,
+                        lease_deadline,
+                        abort,
+                    )
+                    .await;
+                    return ClaimOutcome::Done;
+                }
+                result = download => result,
+            };
+
+            match download_result {
                 Ok(()) => {
                     match finish_delivery(request_id.clone(), attempt.clone(), operation_deadline)
                         .await
