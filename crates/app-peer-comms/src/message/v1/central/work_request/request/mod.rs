@@ -14,6 +14,8 @@ pub struct WorkRequest {
     pub status: status::WorkRequestStatus,
     #[serde(default)]
     pub errors: Arc<[Arc<str>]>,
+    #[serde(default)]
+    pub parked: bool,
 }
 impl WorkRequest {
     #[must_use]
@@ -44,6 +46,12 @@ impl WorkRequest {
     #[inline]
     pub fn errors(&self) -> &[Arc<str>] {
         &self.errors
+    }
+
+    #[must_use]
+    #[inline]
+    pub const fn parked(&self) -> bool {
+        self.parked
     }
 
     #[must_use]
@@ -100,6 +108,7 @@ impl<'a> TryFrom<&'a app_database::api::requests::RequestInfoResponse> for WorkR
             metadata: value.metadata.clone(),
             status: value.status.clone().try_into()?,
             errors: value.errors.clone(),
+            parked: false,
         })
     }
 }

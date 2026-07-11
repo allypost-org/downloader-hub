@@ -27,8 +27,14 @@ pub(super) struct Waiter {
 pub(super) enum Cmd {
     Available(Arc<[RequestInfoResponse]>),
     GetWorkItem(Waiter),
-    Disconnect { session_id: u64 },
+    Disconnect {
+        session_id: u64,
+    },
     ListParked(oneshot::Sender<Vec<AdminParkedWorker>>),
+    IsRefusedByAllParked {
+        refused_by: Arc<[Arc<str>]>,
+        reply: oneshot::Sender<bool>,
+    },
 }
 
 #[derive(Clone)]
@@ -90,6 +96,23 @@ impl WorkDistributor {
         }
         rx.await.ok()
     }
+
+    pub async fn is_refused_by_all_parked(&self, refused_by: &[Arc<str>]) -> Option<bool> {
+        let (tx, rx) = oneshot::channel();
+        if self
+            .cmd_tx
+            .send(Cmd::IsRefusedByAllParked {
+                refused_by: refused_by.into(),
+                reply: tx,
+            })
+            .await
+            .is_err()
+        {
+            warn!("WorkDistributor gone; failing is_refused_by_all_parked");
+            return None;
+        }
+        rx.await.ok()
+    }
 }
 
 async fn run(mut rx: mpsc::Receiver<Cmd>) {
@@ -139,6 +162,11 @@ async fn run(mut rx: mpsc::Receiver<Cmd>) {
                     })
                     .collect();
                 let _ = tx.send(parked).await;
+            }
+            Cmd::IsRefusedByAllParked { refused_by, reply } => {
+                let parked = !waiting.is_empty()
+                    && waiting.iter().all(|w| refused_by.contains(&w.authed_id));
+                let _ = reply.send(parked).await;
             }
         }
     }

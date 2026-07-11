@@ -27,7 +27,7 @@ use app_peer_comms::{
         update_status_message_result::{
             UpdateStatusMessageResult, UpdateStatusMessageResultStatus,
         },
-        work_request::request::WorkRequest,
+        work_request::request::{WorkRequest, status::WorkRequestStatus},
         work_request_snapshot::{WorkRequestSnapshot, WorkRequestSnapshotError},
         work_request_watch_event::WorkRequestWatchEvent,
     },
@@ -1251,7 +1251,13 @@ async fn send_request(
     tx: &app_peer_comms::irpc::channel::mpsc::Sender<WorkRequestWatchEvent>,
     row: &app_database::api::requests::RequestInfoResponse,
 ) -> Result<(), app_peer_comms::message::v1::central::work_request::request::WorkRequestError> {
-    let work_request = std::convert::TryInto::<WorkRequest>::try_into(row)?;
+    let mut work_request = std::convert::TryInto::<WorkRequest>::try_into(row)?;
+    if matches!(work_request.status(), WorkRequestStatus::Pending) {
+        work_request.parked = distributor()
+            .is_refused_by_all_parked(&row.refused_by)
+            .await
+            .unwrap_or(false);
+    }
     let _ = tx.send(WorkRequestWatchEvent::Request(work_request)).await;
     Ok(())
 }

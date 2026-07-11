@@ -260,9 +260,13 @@ where
         match event {
             WorkRequestWatchEvent::Request(req) => match req.status() {
                 WorkRequestStatus::Pending => {
-                    platform
-                        .update_status_message("Request is waiting for processing...")
-                        .await;
+                    let message = if req.parked() {
+                        "All available workers couldn't process this request. It may still be \
+                         picked up by another worker."
+                    } else {
+                        "Request is waiting for processing..."
+                    };
+                    platform.update_status_message(message).await;
                 }
                 WorkRequestStatus::InProgress(progress) => {
                     if !progress.waiting_for_requester {

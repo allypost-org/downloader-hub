@@ -1,8 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import type { AccountRef, RequestInfoResponse } from "@/lib/api";
 import { api } from "@/lib/api";
+import { isRequestParked } from "@/lib/requestParked";
 import { useAccountNames } from "@/lib/useAccountNames";
 import { useAuthStore } from "@/stores/auth-store";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -46,6 +48,13 @@ export function RequestDetail({
     initialData: request ?? undefined,
   });
 
+  const parkedWorkers = useQuery({
+    queryKey: ["central-parked"],
+    queryFn: () => api.centralParkedWorkers(),
+    refetchInterval: 5_000,
+    retry: false,
+  });
+
   if (!data) {
     return (
       <Card>
@@ -60,6 +69,9 @@ export function RequestDetail({
   // the component reads the fresh value rather than the stale prop.
   const req = data;
   const status = req.status;
+  const parked =
+    !parkedWorkers.isError &&
+    isRequestParked(req, parkedWorkers.data);
 
   function refFieldLabel(ref: AccountRef | null | undefined): string {
     if (!ref) return "—";
@@ -86,7 +98,14 @@ export function RequestDetail({
         <div className="flex items-center gap-2">
           <span className="text-muted-foreground">Status</span>
           <StatusBadge status={status.Type} />
+          {parked && <Badge variant="warning">Parked</Badge>}
         </div>
+        {parked && (
+          <p className="text-xs text-muted-foreground">
+            All workers currently waiting for work have refused this request. A
+            new worker or a worker that has not tried yet may still take it.
+          </p>
+        )}
         <Field label="From" value={authedLabel(req.requester)} />
         <Field
           label="Ordered by"
