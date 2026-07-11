@@ -52,6 +52,6 @@ pub struct DiscordBotConfig {
     /// The maximum size of a payload to send to the Discord API.
     ///
     /// If not set, the default value will be used.
-    #[arg(long = "discord-max-payload-size", value_name = "MAX_PAYLOAD_SIZE", env = "DOWNLOADER_HUB_DISCORD_MAX_PAYLOAD_SIZE", value_hint = ValueHint::Other, default_value = "25MB")]
+    #[arg(long = "discord-max-payload-size", value_name = "MAX_PAYLOAD_SIZE", env = "DOWNLOADER_HUB_DISCORD_MAX_PAYLOAD_SIZE", value_hint = ValueHint::Other, default_value = "10MB")]
     pub max_payload_size: Size,
 }
