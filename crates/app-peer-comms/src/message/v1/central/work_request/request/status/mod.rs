@@ -10,6 +10,7 @@ pub enum WorkRequestStatus {
     InProgress(ProgressInfo),
     Done { at: u64, by: String },
     Failed { at: u64, by: String, reason: String },
+    Delivering { since: u64, claimed_by: String },
 }
 
 impl WorkRequestStatus {
@@ -34,6 +35,11 @@ impl WorkRequestStatus {
     #[must_use]
     pub const fn is_done(&self) -> bool {
         matches!(self, Self::Done { .. })
+    }
+
+    #[must_use]
+    pub const fn is_delivering(&self) -> bool {
+        matches!(self, Self::Delivering { .. })
     }
 
     #[must_use]
@@ -88,12 +94,15 @@ impl TryFrom<app_database::api::requests::RequestStatus> for WorkRequestStatus {
                     )
                 },
             })),
-            app_database::api::requests::RequestStatus::Done { at, by } => {
+            app_database::api::requests::RequestStatus::Done { at, by, .. } => {
                 Ok(Self::Done { at, by })
             }
             app_database::api::requests::RequestStatus::Failed { at, by, reason } => {
                 Ok(Self::Failed { at, by, reason })
             }
+            app_database::api::requests::RequestStatus::Delivering {
+                since, claimed_by, ..
+            } => Ok(Self::Delivering { since, claimed_by }),
         }
     }
 }

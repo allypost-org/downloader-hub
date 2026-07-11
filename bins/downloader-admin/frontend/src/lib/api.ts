@@ -1,4 +1,4 @@
-export type RequestStatusType = "pending" | "inProgress" | "done" | "failed";
+export type RequestStatusType = "pending" | "inProgress" | "delivering" | "done" | "failed";
 
 export type AccountPlatform = "telegram" | "discord";
 
@@ -24,6 +24,7 @@ export interface RequestInfoResponse {
     filesData?: string;
     at?: string;
     reason?: string;
+    deliveredBy?: string;
   };
   errors: string[];
   refusedBy: string[];
@@ -39,6 +40,7 @@ export interface RequestInfoResponse {
 export interface RequestCounts {
   pending: string;
   inProgress: string;
+  delivering: string;
   done: string;
   failed: string;
 }

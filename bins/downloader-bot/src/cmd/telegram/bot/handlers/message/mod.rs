@@ -1,38 +1,23 @@
-use std::{
-    fmt::Write,
-    sync::{Arc, LazyLock, Mutex},
-};
-
-use app_helpers::temp_file::TempFile;
 use app_peer_comms::message::v1::{
-    central::{create_result::CreateResult, work_request::WorkRequest},
+    central::create_result::CreateResult,
     common::{
         file::{FileReference, FileUrl},
         request_info::RequestInfo,
     },
 };
-use futures::future;
 use teloxide::{
     prelude::*,
-    types::{Message as TelegramMessage, MessageEntityKind, ReplyParameters},
+    types::{Message as TelegramMessage, MessageEntityKind},
 };
-use tokio::sync::Semaphore;
-use tracing::{debug, info, trace, warn};
+use tracing::{info, warn};
 use url::Url;
 
 use crate::{
-    cmd::{
-        _common::work_request::{WorkRequestGuard, WorkRequestLockMap},
-        telegram::{
-            bot::{
-                TelegramBot, helpers,
-                helpers::{
-                    file_group::files_to_input_media_groups, file_id::FileId,
-                    retried::try_send_to_retrying, status_message::StatusMessage,
-                },
-            },
-            common::downloadable::Downloadable,
-        },
+    cmd::telegram::bot::{
+        TelegramBot,
+        handlers::delivery::start_request_task,
+        helpers,
+        helpers::{file_id::FileId, status_message::StatusMessage},
     },
     peering::rpc::RpcClient,
 };
@@ -134,6 +119,10 @@ pub async fn handle_message(msg: &TelegramMessage) -> ResponseResult<()> {
             ))
             .await;
 
+        // Start a supervised per-request watcher for this freshly created
+        // request. Not a recovery task (it was just created).
+        start_request_task(result.id.clone(), url_status_message, false).await;
+
         added_some = true;
     }
 
@@ -146,257 +135,6 @@ pub async fn handle_message(msg: &TelegramMessage) -> ResponseResult<()> {
     }
 
     status_message.delete_message().await;
-
-    Ok(())
-}
-
-#[tracing::instrument(name="process-work-request", skip_all, fields(request_id = ?work_request.request_id()))]
-#[allow(clippy::too_many_lines)]
-pub async fn process_work_request(
-    work_request: Arc<WorkRequest>,
-    mut status_message: StatusMessage,
-) -> ResponseResult<()> {
-    static WORK_REQUESTS_PROCESSING_LOCKS: LazyLock<Arc<Mutex<WorkRequestLockMap>>> =
-        LazyLock::new(|| Arc::new(Mutex::new(WorkRequestLockMap::new())));
-
-    let request_id = work_request.request_id();
-
-    debug!(request = ?work_request, "Start processing work request");
-
-    let status = &work_request.status();
-
-    if status.is_pending() {
-        trace!("Work request is pending");
-
-        status_message
-            .update_message("Request is waiting for processing...")
-            .await;
-
-        return Ok(());
-    }
-
-    if let Some(reason) = status.failed_reason() {
-        trace!(?reason, "Work request failed");
-
-        status_message
-            .update_message(&format!("Request failed: {}", reason))
-            .await;
-
-        return Ok(());
-    }
-
-    let Some(progress) = status.progress_info() else {
-        trace!(?status, "Work request is not in progress, breaking listen");
-        return Ok(());
-    };
-
-    if !progress.waiting_for_requester {
-        trace!("Work request is not waiting for requester");
-
-        if let Some(message) = progress.message.as_ref() {
-            trace!(?message, "Work request has message");
-            status_message.update_message(message).await;
-        }
-
-        return Ok(());
-    }
-
-    let _work_request_guard = match WorkRequestGuard::try_acquire(
-        WORK_REQUESTS_PROCESSING_LOCKS.clone(),
-        request_id.clone(),
-    ) {
-        Some(g) => g,
-        None => {
-            debug!("Work request is already being processed");
-            return Ok(());
-        }
-    };
-
-    let Some(files_data) = progress.files_data.as_ref() else {
-        info!(?progress, "Work request has no files, marking as complete");
-
-        status_message
-            .update_message("Got no files back from worker")
-            .await;
-
-        let res = match RpcClient::work_request_complete(request_id.clone()).await {
-            Ok(res) => res,
-            Err(e) => {
-                status_message
-                    .update_message(&format!("Failed to mark request as complete: {}", e))
-                    .await;
-
-                return Ok(());
-            }
-        };
-
-        if !res.is_ok() {
-            status_message
-                .update_message("Failed to mark request as complete")
-                .await;
-
-            return Ok(());
-        }
-
-        status_message.delete_message().await;
-
-        return Ok(());
-    };
-
-    trace!(?files_data, "Work request has files, downloading...");
-
-    status_message
-        .update_message("Downloading media to bot...")
-        .await;
-
-    // Limit to max 4 downloads in parallel
-    let concurrency_sem = Arc::new(Semaphore::new(4));
-    let downloaded_files = files_data
-        .iter()
-        .map(|x| {
-            let concurrency_sem = concurrency_sem.clone();
-            async move {
-                let _permit = concurrency_sem.acquire().await?;
-
-                let temp_file =
-                    tokio::task::spawn_blocking(|| TempFile::new_with_prefix("downloader-bot-dl-"))
-                        .await??;
-
-                let tokio_file = tokio::fs::File::from(temp_file.try_clone_file()?);
-
-                trace!(suggested_name = ?x.get_suggested_name(), "Downloading file");
-
-                let (_, suggested_name) = x.download_into(tokio_file).await?;
-
-                Ok::<_, anyhow::Error>((temp_file, suggested_name))
-            }
-        })
-        .map(Box::pin);
-
-    let (downloaded_files, downloaded_files_failed): (Vec<_>, Vec<_>) =
-        future::join_all(downloaded_files)
-            .await
-            .into_iter()
-            .partition(std::result::Result::is_ok);
-
-    let downloaded_files = downloaded_files
-        .into_iter()
-        .map(|x| x.unwrap_or_else(|_| unreachable!()))
-        .collect::<Vec<_>>();
-
-    let downloaded_files_failed = downloaded_files_failed
-        .into_iter()
-        .map(|x| match x {
-            Ok(_) => {
-                unreachable!()
-            }
-            Err(e) => e,
-        })
-        .collect::<Vec<_>>();
-
-    status_message
-        .update_message("Files downloaded to bot. Uploading here...")
-        .await;
-
-    if let Some(owner_id) = TelegramBot::owner_id()
-        && status_message
-            .chat_id()
-            .as_user()
-            .is_some_and(|x| x == owner_id)
-    {
-        status_message
-            .update_message("Copying files to download directory...")
-            .await;
-
-        debug!("Copying files to download directory");
-        if let Err(e) = copy_files_to_save_dir(&downloaded_files).await {
-            status_message
-                .send_additional_message(&format!("Failed to copy files: {}", e))
-                .await;
-        }
-        debug!("Copied files to download directory");
-    }
-
-    trace!("Chunking files by size");
-
-    let (media_groups, failed_files) = files_to_input_media_groups(
-        downloaded_files.iter().map(|(x, _)| x),
-        TelegramBot::max_payload_size().bytes().cast_unsigned(),
-    )
-    .await;
-
-    {
-        let errs = {
-            let mut errs = vec![];
-            for err in downloaded_files_failed {
-                errs.push(format!("Failed to download file: {}", err));
-            }
-            for (_path, err) in failed_files {
-                errs.push(format!("Failed to upload file: {}", err));
-            }
-            for err in work_request.errors() {
-                errs.push(err.to_string());
-            }
-            errs
-        };
-
-        if !errs.is_empty() {
-            debug!(?errs, "Failed to process some files");
-            let mut err_msg = String::new();
-            let err_msg = errs.into_iter().fold(&mut err_msg, |acc, e| {
-                _ = write!(acc, "\n - {e}");
-                acc
-            });
-
-            status_message
-                .send_additional_message(&format!("Failed to process some files:{}", err_msg))
-                .await;
-        }
-    }
-
-    let replying_to_id = status_message.msg_replying_to_id();
-    for media_group in media_groups {
-        let res = try_send_to_retrying(
-            status_message.chat_id(),
-            media_group,
-            Box::new(move |chat_id, media_group| async move {
-                TelegramBot::bot()
-                    .send_media_group(chat_id, media_group)
-                    .reply_parameters(
-                        ReplyParameters::new(replying_to_id).allow_sending_without_reply(),
-                    )
-                    .send()
-                    .await
-            }),
-        )
-        .await;
-
-        match res {
-            Ok(_) => {
-                trace!("Media group sent");
-            }
-            Err(e) => {
-                warn!(?e, "Failed to send media group");
-            }
-        }
-    }
-
-    status_message.delete_message().await;
-
-    let res = match RpcClient::work_request_complete(request_id.clone()).await {
-        Ok(res) => res,
-        Err(e) => {
-            warn!(?e, "Failed to mark work request as complete");
-            return Ok(());
-        }
-    };
-
-    if !res.is_ok() {
-        warn!("Work request marked as complete failed");
-        return Ok(());
-    }
-
-    info!("Finished processing work request");
 
     Ok(())
 }
@@ -415,42 +153,4 @@ pub fn urls_in_message(msg: &TelegramMessage) -> Vec<Url> {
             _ => None,
         })
         .collect()
-}
-#[tracing::instrument(skip_all)]
-async fn copy_files_to_save_dir<T, OT>(
-    fixed_file_paths: &[(T, Option<OT>)],
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
-where
-    T: AsRef<std::path::Path> + Sync + Send,
-    OT: AsRef<std::path::Path> + Sync + Send,
-{
-    let download_dir = match TelegramBot::owner_download_dir() {
-        Some(x) => x,
-        None => return Ok(()),
-    };
-
-    for (file, suggested_name) in fixed_file_paths {
-        let file = file.as_ref();
-        let file_name = suggested_name
-            .as_ref()
-            .and_then(|n| {
-                std::path::PathBuf::from(n.as_ref())
-                    .file_name()
-                    .map(std::borrow::ToOwned::to_owned)
-            })
-            .or_else(|| file.file_name().map(std::borrow::ToOwned::to_owned));
-
-        let Some(file_name) = file_name else {
-            continue;
-        };
-        let dest = download_dir.join(file_name);
-
-        trace!(?file, ?dest, "Copying file to download directory");
-
-        tokio::fs::copy(&file, &dest).await?;
-
-        trace!(?file, ?dest, "Copied file to download directory");
-    }
-
-    Ok(())
 }

@@ -39,21 +39,33 @@ pub enum RequestStatus {
         #[serde(rename = "CleanupId")]
         cleanup_fn_id: ScheduledFunctionId,
         message: Option<String>,
+        files_data: Option<String>,
+        waiting_for_requester: Option<bool>,
     },
-    WaitingForRequester {
+    Delivering {
         #[serde(with = "crate::helpers::serde::bigint")]
         since: u64,
-        by: String,
+        #[serde(with = "crate::helpers::serde::bigint")]
+        worker_since: u64,
+        worker_by: AuthedId,
+        claimed_by: AuthedId,
+        delivery_attempt_id: String,
         message: Option<String>,
         files_data: Option<String>,
+        #[serde(rename = "CleanupId")]
+        cleanup_fn_id: ScheduledFunctionId,
     },
     Done {
         #[serde(rename = "at")]
         at_timestamp: i64,
+        by: AuthedId,
+        #[serde(default)]
+        delivered_by: Option<AuthedId>,
     },
     Failed {
         #[serde(rename = "at")]
         at_timestamp: i64,
+        by: AuthedId,
         reason: String,
     },
 }

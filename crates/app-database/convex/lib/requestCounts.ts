@@ -4,7 +4,7 @@ import { components } from "../_generated/api";
 import { requestsId } from "../schema";
 
 export type RequestStatusNamespace =
-  "pending" | "inProgress" | "done" | "failed";
+  "pending" | "inProgress" | "delivering" | "done" | "failed";
 
 /**
  * Aggregate over the `requests` table, namespaced by `status.Type`.

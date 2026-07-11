@@ -111,20 +111,11 @@ impl EventHandler for Handler {
         let ctx = Arc::new(ctx);
 
         tokio::task::spawn(async move {
-            loop {
-                if let Err(e) = handlers::work_request::watch_work_requests().await {
-                    warn!(?e, "Work requests watcher exited with error");
-                    if let Err(re) = crate::peering::reconnect().await {
-                        warn!(?re, "Failed to re-bootstrap irpc session; will retry");
-                    }
-                }
-
-                let about_two_seconds = 2000 + rand::random_range(0..=2000);
-                let about_two_seconds = std::time::Duration::from_millis(about_two_seconds);
-
-                debug!(time = ?about_two_seconds, "Work requests stream finished. Sleeping for a random amount of time...");
-
-                tokio::time::sleep(about_two_seconds).await;
+            // One-shot startup scan: recover in-progress/delivering requests as
+            // supervised per-request watchers. Per-request watches own their
+            // own lifecycles now; there is no persistent snapshot loop.
+            if let Err(e) = handlers::work_request::startup_scan().await {
+                warn!(?e, "Startup scan exited with error; giving up");
             }
         });
 

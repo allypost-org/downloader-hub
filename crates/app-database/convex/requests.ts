@@ -11,16 +11,19 @@ import schema, {
   authedId,
   requestPending,
   requestFailed,
+  requestDelivering,
   requestInProgress,
   requests,
   requestsId,
 } from "./schema";
+import { randomDeliveryAttemptId } from "./helpers/delivery";
 import { Doc, Id } from "./_generated/dataModel";
 import { mergedStream, stream } from "convex-helpers/server/stream";
 import {
   customCtx,
   customMutation,
 } from "convex-helpers/server/customFunctions";
+import type { MutationCtx } from "./_generated/server";
 import triggers from "./lib/triggers";
 import { requestCountsAggregate } from "./lib/requestCounts";
 
@@ -36,7 +39,43 @@ const internalMutation = customMutation(
 // const MAX_PROCESSING_TIME_MS = 15 * 1_000;
 const MAX_PROCESSING_IDLE_TIME_MS = 10 * 60 * 1_000;
 const MAX_WAITING_FOR_REQUESTER_IDLE_TIME_MS = 15 * 60 * 1_000;
+// delivery lease: the bot owns a claimed request for this long before the
+// scheduled `deliveryCleanup` restores the waiting state. the bot uses a
+// slightly shorter operation timeout so it can release the lease itself.
+const MAX_DELIVERING_IDLE_TIME_MS = 10 * 60 * 1_000;
 const MAX_TRIES = 5;
+
+const requestDataReturn = {
+  requestId: v.id(requestsId),
+  requester: requests.requester,
+  info: requests.info,
+  metadata: requests.metadata,
+  status: requests.status,
+  errors: requests.errors,
+  refusedBy: requests.refusedBy,
+  idempotencyKey: requests.idempotencyKey,
+  lastModified: requests.lastModified,
+  createdAt: v.number(),
+  orderedBy: requests.orderedBy,
+  orderedIn: requests.orderedIn,
+};
+
+function toRequestData(row: Doc<typeof requestsId>) {
+  return {
+    requestId: row._id,
+    requester: row.requester,
+    info: row.info,
+    metadata: row.metadata,
+    status: row.status,
+    errors: row.errors,
+    refusedBy: row.refusedBy ?? [],
+    idempotencyKey: row.idempotencyKey,
+    lastModified: row.lastModified,
+    createdAt: row._creationTime,
+    orderedBy: row.orderedBy,
+    orderedIn: row.orderedIn,
+  };
+}
 
 export const get = query({
   args: {
@@ -44,6 +83,24 @@ export const get = query({
   },
   handler: (ctx, args) => {
     return ctx.db.get(args.requestId);
+  },
+});
+
+// Requester-scoped single-request query. The bot per-request watch backs this
+// query. Non-owner and nonexistent requests both return null so an
+// authenticated bot cannot use ids to discover another bot's requests.
+export const getMineById = query({
+  args: {
+    requestId: v.id(requestsId),
+    requesterId: v.id(authedId),
+  },
+  returns: v.union(v.object(requestDataReturn), v.null()),
+  handler: async (ctx, args) => {
+    const row = await ctx.db.get(args.requestId);
+    if (!row || row.requester !== args.requesterId) {
+      return null;
+    }
+    return toRequestData(row);
   },
 });
 
@@ -100,21 +157,6 @@ export const add = mutation({
     };
   },
 });
-
-const requestDataReturn = {
-  requestId: v.id(requestsId),
-  requester: requests.requester,
-  info: requests.info,
-  metadata: requests.metadata,
-  status: requests.status,
-  errors: requests.errors,
-  refusedBy: requests.refusedBy,
-  idempotencyKey: requests.idempotencyKey,
-  lastModified: requests.lastModified,
-  createdAt: v.number(),
-  orderedBy: requests.orderedBy,
-  orderedIn: requests.orderedIn,
-};
 
 export const getFirstAvailable = query({
   args: {},
@@ -185,6 +227,7 @@ export const getMineInProgress = query({
     const inStatuses = [
       requestInProgress.Type.value,
       requestPending.Type.value,
+      requestDelivering.Type.value,
     ].map((s) =>
       stream(ctx.db, schema)
         .query(requestsId)
@@ -918,6 +961,326 @@ export const finish = mutation({
   },
 });
 
+// ---------------------------------------------------------------------------
+// Delivery lease mutations.
+//
+// A bot that observes `inProgress(waitingForRequester=true)` claims the
+// delivery with `ackDelivery`, which atomically moves the row into the
+// `delivering` state under a fresh random `deliveryAttemptId` and schedules a
+// `deliveryCleanup` fallback. `finishDelivery`, `releaseDelivery`, and
+// `deliveryCleanup` all fence on that attempt id: a stale task or delayed
+// scheduled function cannot mutate a newer attempt.
+// ---------------------------------------------------------------------------
+
+export const ackDelivery = mutation({
+  args: {
+    requestId: v.id(requestsId),
+    requesterId: v.id(authedId),
+  },
+  returns: v.union(
+    v.object({
+      ok: v.literal(true),
+      code: v.literal("Claimed"),
+      deliveryAttemptId: v.string(),
+      filesData: v.optional(v.string()),
+    }),
+    v.object({
+      ok: v.literal(false),
+      code: v.literal("RequestNotFound"),
+    }),
+    v.object({
+      ok: v.literal(false),
+      code: v.literal("RequestNotSubmittedByYou"),
+    }),
+    v.object({
+      ok: v.literal(false),
+      code: v.literal("NotWaitingForRequester"),
+    }),
+    v.object({
+      ok: v.literal(false),
+      code: v.literal("AlreadyDelivering"),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const row = await ctx.db.get(args.requestId);
+
+    if (!row) {
+      return { ok: false, code: "RequestNotFound" } as const;
+    }
+
+    if (row.requester !== args.requesterId) {
+      return { ok: false, code: "RequestNotSubmittedByYou" } as const;
+    }
+
+    if (row.status.Type !== "inProgress") {
+      // A delivering row means another attempt already won; anything else is
+      // simply not claimable right now.
+      const alreadyDelivering = row.status.Type === "delivering";
+      return {
+        ok: false,
+        code: alreadyDelivering
+          ? "AlreadyDelivering"
+          : "NotWaitingForRequester",
+      } as const;
+    }
+
+    if (!row.status.waitingForRequester) {
+      return { ok: false, code: "NotWaitingForRequester" } as const;
+    }
+
+    const deliveryAttemptId = randomDeliveryAttemptId();
+
+    const cleanupId = (await ctx.scheduler.runAfter(
+      MAX_DELIVERING_IDLE_TIME_MS,
+      internal.requests.deliveryCleanup,
+      {
+        requestId: args.requestId,
+        deliveryAttemptId,
+      },
+    )) as Id<"_scheduled_functions">;
+
+    const now = BigInt(Date.now());
+
+    await Promise.all([
+      ctx.db.patch(args.requestId, {
+        status: {
+          Type: "delivering",
+          since: now,
+          workerSince: row.status.since,
+          workerBy: row.status.by,
+          claimedBy: args.requesterId,
+          deliveryAttemptId,
+          message: row.status.message,
+          filesData: row.status.filesData,
+          CleanupId: cleanupId,
+        },
+        lastModified: now,
+      }),
+      ctx.scheduler.cancel(row.status.CleanupId),
+    ]);
+
+    return {
+      ok: true,
+      code: "Claimed",
+      deliveryAttemptId,
+      filesData: row.status.filesData,
+    } as const;
+  },
+});
+
+export const finishDelivery = mutation({
+  args: {
+    requestId: v.id(requestsId),
+    requesterId: v.id(authedId),
+    deliveryAttemptId: v.string(),
+  },
+  returns: v.union(
+    v.object({ ok: v.literal(false), code: v.literal("RequestNotFound") }),
+    v.object({
+      ok: v.literal(false),
+      code: v.literal("RequestNotSubmittedByYou"),
+    }),
+    v.object({ ok: v.literal(false), code: v.literal("NotDelivering") }),
+    v.object({ ok: v.literal(false), code: v.literal("StaleAttempt") }),
+    v.object({ ok: v.literal(true), code: v.literal("Ok") }),
+  ),
+  handler: async (ctx, args) => {
+    const row = await ctx.db.get(args.requestId);
+
+    if (!row) {
+      return { ok: false, code: "RequestNotFound" } as const;
+    }
+
+    if (row.requester !== args.requesterId) {
+      return { ok: false, code: "RequestNotSubmittedByYou" } as const;
+    }
+
+    if (row.status.Type !== "delivering") {
+      return { ok: false, code: "NotDelivering" } as const;
+    }
+
+    if (row.status.deliveryAttemptId !== args.deliveryAttemptId) {
+      return { ok: false, code: "StaleAttempt" } as const;
+    }
+
+    await Promise.all([
+      ctx.db.patch(args.requestId, {
+        status: {
+          Type: "done",
+          at: BigInt(Date.now()),
+          by: row.status.workerBy,
+          deliveredBy: row.status.claimedBy,
+        },
+        lastModified: BigInt(Date.now()),
+      }),
+      ctx.scheduler.cancel(row.status.CleanupId),
+    ]);
+
+    return { ok: true, code: "Ok" } as const;
+  },
+});
+
+export const failDelivery = mutation({
+  args: {
+    requestId: v.id(requestsId),
+    requesterId: v.id(authedId),
+    deliveryAttemptId: v.string(),
+    reason: requestFailed.reason,
+  },
+  returns: v.union(
+    v.object({ ok: v.literal(false), code: v.literal("RequestNotFound") }),
+    v.object({
+      ok: v.literal(false),
+      code: v.literal("RequestNotSubmittedByYou"),
+    }),
+    v.object({ ok: v.literal(false), code: v.literal("NotDelivering") }),
+    v.object({ ok: v.literal(false), code: v.literal("StaleAttempt") }),
+    v.object({ ok: v.literal(true), code: v.literal("Failed") }),
+  ),
+  handler: async (ctx, args) => {
+    const row = await ctx.db.get(args.requestId);
+
+    if (!row) {
+      return { ok: false, code: "RequestNotFound" } as const;
+    }
+
+    if (row.requester !== args.requesterId) {
+      return { ok: false, code: "RequestNotSubmittedByYou" } as const;
+    }
+
+    if (row.status.Type !== "delivering") {
+      return { ok: false, code: "NotDelivering" } as const;
+    }
+
+    if (row.status.deliveryAttemptId !== args.deliveryAttemptId) {
+      return { ok: false, code: "StaleAttempt" } as const;
+    }
+
+    const now = BigInt(Date.now());
+    await Promise.all([
+      ctx.db.patch(args.requestId, {
+        status: {
+          Type: "failed",
+          at: now,
+          by: row.status.claimedBy,
+          reason: args.reason,
+        },
+        lastModified: now,
+      }),
+      ctx.scheduler.cancel(row.status.CleanupId),
+    ]);
+
+    return { ok: true, code: "Failed" } as const;
+  },
+});
+
+export const releaseDelivery = mutation({
+  args: {
+    requestId: v.id(requestsId),
+    requesterId: v.id(authedId),
+    deliveryAttemptId: v.string(),
+  },
+  returns: v.union(
+    v.object({ ok: v.literal(false), code: v.literal("RequestNotFound") }),
+    v.object({
+      ok: v.literal(false),
+      code: v.literal("RequestNotSubmittedByYou"),
+    }),
+    v.object({ ok: v.literal(false), code: v.literal("NotDelivering") }),
+    v.object({ ok: v.literal(false), code: v.literal("StaleAttempt") }),
+    v.object({ ok: v.literal(true), code: v.literal("Released") }),
+  ),
+  handler: async (ctx, args) => {
+    const row = await ctx.db.get(args.requestId);
+
+    if (!row) {
+      return { ok: false, code: "RequestNotFound" } as const;
+    }
+
+    if (row.requester !== args.requesterId) {
+      return { ok: false, code: "RequestNotSubmittedByYou" } as const;
+    }
+
+    if (row.status.Type !== "delivering") {
+      return { ok: false, code: "NotDelivering" } as const;
+    }
+
+    if (row.status.deliveryAttemptId !== args.deliveryAttemptId) {
+      return { ok: false, code: "StaleAttempt" } as const;
+    }
+
+    await restoreWaiting(ctx, args.requestId, row, row.status.CleanupId);
+
+    return { ok: true, code: "Released" } as const;
+  },
+});
+
+export const deliveryCleanup = internalMutation({
+  args: {
+    requestId: v.id(requestsId),
+    deliveryAttemptId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const row = await ctx.db.get(args.requestId);
+
+    if (!row) {
+      return null;
+    }
+
+    if (row.status.Type !== "delivering") {
+      return null;
+    }
+
+    if (row.status.deliveryAttemptId !== args.deliveryAttemptId) {
+      // a newer attempt owns the lease; this scheduled cleanup is stale.
+      return null;
+    }
+
+    await restoreWaiting(ctx, args.requestId, row, row.status.CleanupId);
+    return null;
+  },
+});
+
+/**
+ * Restore a `delivering` row back to `inProgress(waitingForRequester=true)`,
+ * carrying over the worker identity and file data. Cancels the (matched)
+ * delivery cleanup and schedules a fresh `takeCleanup` using the current
+ * `tries`. Used by both `releaseDelivery` and `deliveryCleanup`.
+ */
+async function restoreWaiting(
+  ctx: MutationCtx,
+  requestId: Id<typeof requestsId>,
+  row: Doc<typeof requestsId>,
+  deliveryCleanupId: Id<"_scheduled_functions">,
+) {
+  if (row.status.Type !== "delivering") return;
+
+  const cleanupId = (await ctx.scheduler.runAfter(
+    MAX_WAITING_FOR_REQUESTER_IDLE_TIME_MS,
+    internal.requests.takeCleanup,
+    {
+      requestId,
+      tries: row.tries,
+    },
+  )) as Id<"_scheduled_functions">;
+
+  await Promise.all([
+    ctx.db.patch(requestId, {
+      status: {
+        Type: "inProgress",
+        since: row.status.workerSince,
+        by: row.status.workerBy,
+        message: row.status.message,
+        filesData: row.status.filesData,
+        waitingForRequester: true,
+        CleanupId: cleanupId,
+      },
+      lastModified: BigInt(Date.now()),
+    }),
+    ctx.scheduler.cancel(deliveryCleanupId),
+  ]);
+}
+
 export const clearRefusals = mutation({
   args: {
     requestId: v.id(requestsId),
@@ -952,6 +1315,7 @@ export const clearRefusals = mutation({
 const requestStatusType = v.union(
   v.literal("pending"),
   v.literal("inProgress"),
+  v.literal("delivering"),
   v.literal("done"),
   v.literal("failed"),
 );
@@ -1196,11 +1560,18 @@ export const counts = query({
   returns: v.object({
     pending: v.int64(),
     inProgress: v.int64(),
+    delivering: v.int64(),
     done: v.int64(),
     failed: v.int64(),
   }),
   handler: async (ctx) => {
-    const statuses = ["pending", "inProgress", "done", "failed"] as const;
+    const statuses = [
+      "pending",
+      "inProgress",
+      "delivering",
+      "done",
+      "failed",
+    ] as const;
     const entries = await Promise.all(
       statuses.map(async (s) => {
         const count = await requestCountsAggregate.count(ctx, {
@@ -1212,6 +1583,7 @@ export const counts = query({
     return Object.fromEntries(entries) as {
       pending: bigint;
       inProgress: bigint;
+      delivering: bigint;
       done: bigint;
       failed: bigint;
     };
@@ -1313,6 +1685,23 @@ export const cancel = mutation({
       return { ok: true, code: "Ok" } as const;
     }
 
+    if (row.status.Type === "delivering") {
+      const ops: Promise<unknown>[] = [
+        ctx.db.patch(args.requestId, {
+          status: {
+            Type: "failed",
+            at: BigInt(Date.now()),
+            by: args.by,
+            reason: "Cancelled by admin",
+          },
+          lastModified: BigInt(Date.now()),
+        }),
+      ];
+      ops.push(ctx.scheduler.cancel(row.status.CleanupId));
+      await Promise.all(ops);
+      return { ok: true, code: "Ok" } as const;
+    }
+
     return { ok: true, code: "Ok" } as const;
   },
 });
@@ -1340,7 +1729,10 @@ export const remove = mutation({
 
     const ops: Promise<unknown>[] = [ctx.db.delete(args.requestId)];
 
-    if (row.status.Type === "inProgress" && row.status.CleanupId) {
+    if (
+      (row.status.Type === "inProgress" || row.status.Type === "delivering") &&
+      row.status.CleanupId
+    ) {
       ops.push(ctx.scheduler.cancel(row.status.CleanupId));
     }
 

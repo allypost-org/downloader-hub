@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     sync::{Arc, LazyLock, Mutex, OnceLock},
     time::{Duration, Instant},
 };
@@ -10,20 +11,25 @@ use app_peer_comms::{
     irpc::WithChannels,
     irpc_iroh,
     message::v1::central::{
+        ack_delivery_result::WorkRequestAckResult,
         add_errors_result::{AddErrorsResult, AddErrorsResultStatus},
         create_result::{CreateResult, CreateResultData},
+        fail_delivery_result::WorkRequestFailDeliveryResult,
         fail_result::{FailResult, FailResultStatus},
+        finish_delivery_result::WorkRequestFinishDeliveryResult,
         finish_result::FinishResult,
         get_work_item_result::GetWorkItemResult,
         move_to_waiting_for_requester_result::{
             MoveToWaitingForRequesterResult, MoveToWaitingForRequesterResultStatus,
         },
+        release_delivery_result::WorkRequestReleaseDeliveryResult,
         take_result::FreeResult,
         update_status_message_result::{
             UpdateStatusMessageResult, UpdateStatusMessageResultStatus,
         },
         work_request::request::WorkRequest,
         work_request_snapshot::{WorkRequestSnapshot, WorkRequestSnapshotError},
+        work_request_watch_event::WorkRequestWatchEvent,
     },
     rpc::{
         AuthResult, CentralProtocol, CentralRequest,
@@ -39,6 +45,47 @@ use crate::cmd::central::components::{metrics, rpc::session::SessionRegistry};
 
 const INFLIGHT_LIMIT: usize = 64;
 const CAPABILITIES_TTL: Duration = Duration::from_secs(15);
+/// Per-authed-id cap on concurrent request watches.
+const MAX_WATCHES_PER_AUTHED: usize = 64;
+/// Process-wide cap on concurrent request watches.
+const MAX_WATCHES_GLOBAL: usize = 512;
+
+static GLOBAL_WATCH_SEMAPHORE: LazyLock<Arc<Semaphore>> =
+    LazyLock::new(|| Arc::new(Semaphore::new(MAX_WATCHES_GLOBAL)));
+
+struct PerAuthedWatchState {
+    semaphore: Arc<Semaphore>,
+}
+
+static PER_AUTHED_WATCH_SEMAPHORES: LazyLock<Mutex<HashMap<Arc<str>, Arc<PerAuthedWatchState>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Returns the shared watch-capacity state for an authed id, creating it on
+/// first use. Each state holds at most `MAX_WATCHES_PER_AUTHED` permits.
+fn per_authed_watch_state(authed_id: &Arc<str>) -> Arc<PerAuthedWatchState> {
+    let mut map = PER_AUTHED_WATCH_SEMAPHORES
+        .lock()
+        .expect("per-authed watch semaphore map poisoned");
+    map.entry(authed_id.clone())
+        .or_insert_with(|| {
+            Arc::new(PerAuthedWatchState {
+                semaphore: Arc::new(Semaphore::new(MAX_WATCHES_PER_AUTHED)),
+            })
+        })
+        .clone()
+}
+
+fn reclaim_per_authed_watch_state(authed_id: &Arc<str>, state: &Arc<PerAuthedWatchState>) {
+    let mut map = PER_AUTHED_WATCH_SEMAPHORES
+        .lock()
+        .expect("per-authed watch semaphore map poisoned");
+    if map
+        .get(authed_id)
+        .is_some_and(|current| Arc::ptr_eq(current, state) && Arc::strong_count(state) == 2)
+    {
+        map.remove(authed_id);
+    }
+}
 
 static CAPABILITIES_CACHE: Mutex<Option<(Instant, CapabilitiesSummary)>> = Mutex::new(None);
 
@@ -611,6 +658,248 @@ impl CentralRpcServer {
                 }
                 spawn_watch_mine_in_progress(tx, authed_id, conn);
             }
+            CentralRequest::WorkRequestWait(r) => {
+                let WithChannels { inner, tx, .. } = r;
+                if !is_bot {
+                    let _ = tx.send(WorkRequestWatchEvent::Unavailable).await;
+                    return;
+                }
+                spawn_watch_request(tx, inner.request_id, inner.watch_id, authed_id, conn);
+            }
+            CentralRequest::WorkRequestListMineInProgress(r) => {
+                let WithChannels { tx, .. } = r;
+                if !is_bot {
+                    let _ = tx
+                        .send(WorkRequestSnapshot {
+                            requests: Arc::from([]),
+                            error: Some(WorkRequestSnapshotError::Unauthorized),
+                        })
+                        .await;
+                    return;
+                }
+                tokio::spawn(async move {
+                    match Database::global()
+                        .requests_get_mine_in_progress(authed_id)
+                        .await
+                    {
+                        Ok(list) => {
+                            let requests = match list
+                                .iter()
+                                .map(std::convert::TryInto::<WorkRequest>::try_into)
+                                .collect::<Result<Vec<_>, _>>()
+                            {
+                                Ok(requests) => requests,
+                                Err(e) => {
+                                    error!(?e, "list mine in progress convert failed");
+                                    let _ = tx
+                                        .send(WorkRequestSnapshot {
+                                            requests: Arc::from([]),
+                                            error: Some(WorkRequestSnapshotError::BackendError),
+                                        })
+                                        .await;
+                                    return;
+                                }
+                            };
+                            let snapshot = WorkRequestSnapshot {
+                                requests: requests.into(),
+                                error: None,
+                            };
+                            let _ = tx.send(snapshot).await;
+                        }
+                        Err(e) => {
+                            error!(?e, "list mine in progress failed");
+                            let _ = tx
+                                .send(WorkRequestSnapshot {
+                                    requests: Arc::from([]),
+                                    error: Some(WorkRequestSnapshotError::BackendError),
+                                })
+                                .await;
+                        }
+                    }
+                });
+            }
+            CentralRequest::WorkRequestAck(r) => {
+                let WithChannels { inner, tx, .. } = r;
+                let request_id = inner.request_id.clone();
+                if !is_bot {
+                    let _ = tx.send(WorkRequestAckResult::Unauthorized).await;
+                    return;
+                }
+                match Database::global()
+                    .requests_ack_delivery(request_id, authed_id.clone())
+                    .await
+                {
+                    Ok(app_database::api::requests::AckDeliveryResult::Claimed {
+                        delivery_attempt_id,
+                        files_data,
+                    }) => {
+                        match decode_files_data(files_data.as_deref()) {
+                            Ok(files) => {
+                                let _ = tx
+                                    .send(WorkRequestAckResult::Claimed {
+                                        delivery_attempt_id: delivery_attempt_id.into(),
+                                        files: files.into(),
+                                    })
+                                    .await;
+                            }
+                            Err(e) => {
+                                // Decoding failed after a claim: the lease is now
+                                // active but un-deliverable. Release that exact
+                                // attempt before reporting a backend error so we
+                                // do not strand a lease we cannot fulfill.
+                                error!(
+                                    ?e,
+                                    "decode files data after claim failed; releasing attempt"
+                                );
+                                let attempt: Arc<str> = delivery_attempt_id.into();
+                                let _ = Database::global()
+                                    .requests_release_delivery(
+                                        inner.request_id.clone(),
+                                        authed_id.clone(),
+                                        attempt,
+                                    )
+                                    .await;
+                                let _ = tx.send(WorkRequestAckResult::BackendError).await;
+                            }
+                        }
+                    }
+                    Ok(app_database::api::requests::AckDeliveryResult::NotWaitingForRequester) => {
+                        let _ = tx.send(WorkRequestAckResult::NotWaitingForRequester).await;
+                    }
+                    Ok(app_database::api::requests::AckDeliveryResult::AlreadyDelivering) => {
+                        let _ = tx.send(WorkRequestAckResult::AlreadyDelivering).await;
+                    }
+                    Ok(app_database::api::requests::AckDeliveryResult::RequestNotFound) => {
+                        let _ = tx.send(WorkRequestAckResult::NotFound).await;
+                    }
+                    Ok(
+                        app_database::api::requests::AckDeliveryResult::RequestNotSubmittedByYou,
+                    ) => {
+                        let _ = tx.send(WorkRequestAckResult::Unauthorized).await;
+                    }
+                    Err(e) => {
+                        error!(?e, "ack delivery failed");
+                        let _ = tx.send(WorkRequestAckResult::BackendError).await;
+                    }
+                }
+            }
+            CentralRequest::WorkRequestFinishDelivery(r) => {
+                let WithChannels { inner, tx, .. } = r;
+                let request_id = inner.request_id.clone();
+                if !is_bot {
+                    let _ = tx.send(WorkRequestFinishDeliveryResult::Unauthorized).await;
+                    return;
+                }
+                match Database::global()
+                    .requests_finish_delivery(
+                        request_id,
+                        authed_id,
+                        inner.delivery_attempt_id.clone(),
+                    )
+                    .await
+                {
+                    Ok(app_database::api::requests::FinishDeliveryResult::Ok) => {
+                        let _ = tx.send(WorkRequestFinishDeliveryResult::Ok).await;
+                    }
+                    Ok(app_database::api::requests::FinishDeliveryResult::NotDelivering) => {
+                        let _ = tx
+                            .send(WorkRequestFinishDeliveryResult::NotDelivering)
+                            .await;
+                    }
+                    Ok(app_database::api::requests::FinishDeliveryResult::StaleAttempt) => {
+                        let _ = tx.send(WorkRequestFinishDeliveryResult::StaleAttempt).await;
+                    }
+                    Ok(app_database::api::requests::FinishDeliveryResult::RequestNotFound) => {
+                        let _ = tx.send(WorkRequestFinishDeliveryResult::NotFound).await;
+                    }
+                    Ok(
+                        app_database::api::requests::FinishDeliveryResult::RequestNotSubmittedByYou,
+                    ) => {
+                        let _ = tx.send(WorkRequestFinishDeliveryResult::Unauthorized).await;
+                    }
+                    Err(e) => {
+                        error!(?e, "finish delivery failed");
+                        let _ = tx.send(WorkRequestFinishDeliveryResult::BackendError).await;
+                    }
+                }
+            }
+            CentralRequest::WorkRequestFailDelivery(r) => {
+                let WithChannels { inner, tx, .. } = r;
+                let request_id = inner.request_id.clone();
+                if !is_bot {
+                    let _ = tx.send(WorkRequestFailDeliveryResult::Unauthorized).await;
+                    return;
+                }
+                match Database::global()
+                    .requests_fail_delivery(
+                        request_id,
+                        authed_id,
+                        inner.delivery_attempt_id,
+                        inner.reason.as_ref(),
+                    )
+                    .await
+                {
+                    Ok(app_database::api::requests::FailDeliveryResult::Failed) => {
+                        let _ = tx.send(WorkRequestFailDeliveryResult::Failed).await;
+                    }
+                    Ok(app_database::api::requests::FailDeliveryResult::NotDelivering) => {
+                        let _ = tx.send(WorkRequestFailDeliveryResult::NotDelivering).await;
+                    }
+                    Ok(app_database::api::requests::FailDeliveryResult::StaleAttempt) => {
+                        let _ = tx.send(WorkRequestFailDeliveryResult::StaleAttempt).await;
+                    }
+                    Ok(app_database::api::requests::FailDeliveryResult::RequestNotFound) => {
+                        let _ = tx.send(WorkRequestFailDeliveryResult::NotFound).await;
+                    }
+                    Ok(
+                        app_database::api::requests::FailDeliveryResult::RequestNotSubmittedByYou,
+                    ) => {
+                        let _ = tx.send(WorkRequestFailDeliveryResult::Unauthorized).await;
+                    }
+                    Err(e) => {
+                        error!(?e, "fail delivery failed");
+                        let _ = tx.send(WorkRequestFailDeliveryResult::BackendError).await;
+                    }
+                }
+            }
+            CentralRequest::WorkRequestReleaseDelivery(r) => {
+                let WithChannels { inner, tx, .. } = r;
+                let request_id = inner.request_id.clone();
+                if !is_bot {
+                    let _ = tx
+                        .send(WorkRequestReleaseDeliveryResult::Unauthorized)
+                        .await;
+                    return;
+                }
+                match Database::global()
+                    .requests_release_delivery(
+                        request_id,
+                        authed_id,
+                        inner.delivery_attempt_id.clone(),
+                    )
+                    .await
+                {
+                    Ok(app_database::api::requests::ReleaseDeliveryResult::Released) => {
+                        let _ = tx.send(WorkRequestReleaseDeliveryResult::Released).await;
+                    }
+                    Ok(app_database::api::requests::ReleaseDeliveryResult::NotDelivering) => {
+                        let _ = tx.send(WorkRequestReleaseDeliveryResult::NotDelivering).await;
+                    }
+                    Ok(app_database::api::requests::ReleaseDeliveryResult::StaleAttempt) => {
+                        let _ = tx.send(WorkRequestReleaseDeliveryResult::StaleAttempt).await;
+                    }
+                    Ok(app_database::api::requests::ReleaseDeliveryResult::RequestNotFound) => {
+                        let _ = tx.send(WorkRequestReleaseDeliveryResult::NotFound).await;
+                    }
+                    Ok(app_database::api::requests::ReleaseDeliveryResult::RequestNotSubmittedByYou) => {
+                        let _ = tx.send(WorkRequestReleaseDeliveryResult::Unauthorized).await;
+                    }
+                    Err(e) => {
+                        error!(?e, "release delivery failed");
+                        let _ = tx.send(WorkRequestReleaseDeliveryResult::BackendError).await;
+                    }
+                }
+            }
             CentralRequest::GetCapabilities(r) => {
                 let WithChannels { tx, .. } = r;
                 let summary = aggregate_capabilities_cached().await;
@@ -767,13 +1056,23 @@ fn spawn_watch_mine_in_progress(
                     let Some(emission) = emission else { return; };
                     match emission {
                         Ok(list) => {
-                            let mut requests = Vec::with_capacity(list.len());
-                            for item in list.iter() {
-                                match std::convert::TryInto::<WorkRequest>::try_into(item) {
-                                    Ok(wr) => requests.push(wr),
-                                    Err(e) => warn!(?e, "work request convert failed"),
+                            let requests = match list
+                                .iter()
+                                .map(std::convert::TryInto::<WorkRequest>::try_into)
+                                .collect::<Result<Vec<_>, _>>()
+                            {
+                                Ok(requests) => requests,
+                                Err(e) => {
+                                    error!(?e, "work request convert failed");
+                                    let _ = tx
+                                        .send(WorkRequestSnapshot {
+                                            requests: Arc::from([]),
+                                            error: Some(WorkRequestSnapshotError::BackendError),
+                                        })
+                                        .await;
+                                    return;
                                 }
-                            }
+                            };
                             let snapshot = WorkRequestSnapshot {
                                 requests: requests.into(),
                                 error: None,
@@ -788,4 +1087,171 @@ fn spawn_watch_mine_in_progress(
             }
         }
     })
+}
+
+/// Decode the `filesData` JSON string stored on a delivering row into typed
+/// wire file references. An empty/absent payload decodes to an empty list.
+/// Used only when mapping a successful `ackDelivery` claim to the wire result.
+fn decode_files_data(
+    files_data: Option<&str>,
+) -> Result<Vec<app_peer_comms::message::v1::common::file::FileReference>, String> {
+    use app_peer_comms::message::v1::common::file::FileReference;
+    let raw = files_data.unwrap_or("[]");
+    let db_files: Vec<app_database::entity::requests::file_reference::FileReference> =
+        serde_json::from_str(raw).map_err(|e| e.to_string())?;
+    db_files
+        .into_iter()
+        .map(std::convert::TryInto::<FileReference>::try_into)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
+/// Spawn a per-request watch task that holds both the global and per-authed
+/// capacity permits for its lifetime. Forwards requester-scoped Convex
+/// emissions as `WorkRequestWatchEvent::Request`, and terminates on receiver
+/// drop (`tx.closed()`), connection close, stream end, or stream error.
+#[allow(clippy::significant_drop_tightening)]
+fn spawn_watch_request(
+    tx: app_peer_comms::irpc::channel::mpsc::Sender<WorkRequestWatchEvent>,
+    request_id: app_peer_comms::message::v1::common::RequestId,
+    watch_id: u64,
+    authed_id: Arc<str>,
+    conn: Connection,
+) -> JoinHandle<()> {
+    let global_sem = GLOBAL_WATCH_SEMAPHORE.clone();
+    let authed_state = per_authed_watch_state(&authed_id);
+    tokio::spawn(async move {
+        // Acquire capacity up front. If either pool is exhausted, tell the
+        // client it is overloaded and close the stream without subscribing.
+        // The permits are held for the whole task lifetime (the `run_watch`
+        // block borrows them) and released on return.
+        let authed_permit = match authed_state.semaphore.clone().try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(_) => {
+                warn!(watch_id, "per-authed watch capacity exhausted");
+                let _ = tx.send(WorkRequestWatchEvent::Overloaded).await;
+                return;
+            }
+        };
+        let global_permit = match global_sem.try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(_) => {
+                warn!(watch_id, "global watch capacity exhausted");
+                drop(authed_permit);
+                let _ = tx.send(WorkRequestWatchEvent::Overloaded).await;
+                return;
+            }
+        };
+        run_watch(
+            tx,
+            request_id,
+            watch_id,
+            authed_id.clone(),
+            conn,
+            global_permit,
+            authed_permit,
+        )
+        .await;
+        reclaim_per_authed_watch_state(&authed_id, &authed_state);
+    })
+}
+
+async fn run_watch(
+    tx: app_peer_comms::irpc::channel::mpsc::Sender<WorkRequestWatchEvent>,
+    request_id: app_peer_comms::message::v1::common::RequestId,
+    watch_id: u64,
+    authed_id: Arc<str>,
+    conn: Connection,
+    // Held for the lifetime of this watch so the capacity pools stay
+    // reserved; released when this future returns.
+    _global_permit: tokio::sync::OwnedSemaphorePermit,
+    _authed_permit: tokio::sync::OwnedSemaphorePermit,
+) {
+    // Initial requester-scoped lookup. Unavailable covers both non-owner
+    // and nonexistent requests so an authenticated bot cannot probe ids.
+    let initial = match Database::global()
+        .requests_get_mine_by_id(request_id.clone(), authed_id.clone())
+        .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            let _ = tx.send(WorkRequestWatchEvent::Unavailable).await;
+            return;
+        }
+        Err(e) => {
+            error!(?e, watch_id, "watch request initial lookup failed");
+            let _ = tx.send(WorkRequestWatchEvent::BackendError).await;
+            return;
+        }
+    };
+    if let Err(e) = send_request(&tx, &initial).await {
+        error!(?e, watch_id, "watch request initial conversion failed");
+        let _ = tx.send(WorkRequestWatchEvent::BackendError).await;
+        return;
+    }
+
+    let stream = match Database::global()
+        .requests_watch_mine_by_id(request_id, authed_id)
+        .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            error!(?e, watch_id, "watch request subscribe failed");
+            let _ = tx.send(WorkRequestWatchEvent::BackendError).await;
+            return;
+        }
+    };
+
+    tokio::pin!(stream);
+    loop {
+        tokio::select! {
+            biased;
+            // Connection torn down by the peer.
+            closed = conn.closed() => {
+                debug!(?closed, watch_id, "watch request client disconnected");
+                return;
+            }
+            // Receiver dropped while the connection stays up: the irpc remote
+            // sender resolves `closed()` when the client resets its receiver.
+            // Prompt permit release does not wait for an emission.
+            () = tx.closed() => {
+                debug!(watch_id, "watch request receiver dropped");
+                return;
+            }
+            emission = stream.next() => {
+                let Some(emission) = emission else { return; };
+                match emission {
+                    Ok(Some(row)) => {
+                        if let Err(e) = send_request(&tx, &row).await {
+                            error!(?e, watch_id, "watch request conversion failed");
+                            let _ = tx.send(WorkRequestWatchEvent::BackendError).await;
+                            return;
+                        }
+                    }
+                    // null from the requester-scoped query: the row no longer
+                    // belongs to this bot (or was deleted). Non-disclosing.
+                    Ok(None) => {
+                        let _ = tx.send(WorkRequestWatchEvent::Unavailable).await;
+                        return;
+                    }
+                    Err(e) => {
+                        warn!(?e, watch_id, "watch request emission error");
+                        // End the stream after a Convex watch error rather
+                        // than spinning on repeated errors.
+                        let _ = tx.send(WorkRequestWatchEvent::BackendError).await;
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+async fn send_request(
+    tx: &app_peer_comms::irpc::channel::mpsc::Sender<WorkRequestWatchEvent>,
+    row: &app_database::api::requests::RequestInfoResponse,
+) -> Result<(), app_peer_comms::message::v1::central::work_request::request::WorkRequestError> {
+    let work_request = std::convert::TryInto::<WorkRequest>::try_into(row)?;
+    let _ = tx.send(WorkRequestWatchEvent::Request(work_request)).await;
+    Ok(())
 }

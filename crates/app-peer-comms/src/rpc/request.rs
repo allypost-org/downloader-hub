@@ -145,6 +145,45 @@ pub struct WorkRequestGetMineInProgress;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkRequestWait {
+    pub request_id: RequestId,
+    pub watch_id: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkRequestAck {
+    pub request_id: RequestId,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkRequestFinishDelivery {
+    pub request_id: RequestId,
+    pub delivery_attempt_id: Arc<str>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkRequestReleaseDelivery {
+    pub request_id: RequestId,
+    pub delivery_attempt_id: Arc<str>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkRequestFailDelivery {
+    pub request_id: RequestId,
+    pub delivery_attempt_id: Arc<str>,
+    pub reason: Arc<str>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkRequestListMineInProgress;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GetCapabilities;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

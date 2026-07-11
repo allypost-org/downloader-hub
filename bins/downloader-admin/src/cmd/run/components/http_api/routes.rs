@@ -36,6 +36,7 @@ fn parse_status_type(s: &str) -> Option<RequestStatusType> {
     match s {
         "pending" => Some(RequestStatusType::Pending),
         "inProgress" => Some(RequestStatusType::InProgress),
+        "delivering" => Some(RequestStatusType::Delivering),
         "done" => Some(RequestStatusType::Done),
         "failed" => Some(RequestStatusType::Failed),
         _ => None,

@@ -1,3 +1,3 @@
 pub mod capabilities;
 pub mod downloadable;
-pub mod work_request;
+pub mod request_processor;

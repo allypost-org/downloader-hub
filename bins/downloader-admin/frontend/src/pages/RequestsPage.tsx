@@ -20,7 +20,7 @@ import { DataTable } from "@/components/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
 import { RequestDetail } from "@/pages/RequestDetail";
 
-const TABS = ["failed", "pending", "inProgress", "done"] as const;
+const TABS = ["failed", "pending", "inProgress", "delivering", "done"] as const;
 
 const PAGE_SIZE = 50;
 
@@ -185,7 +185,8 @@ export function RequestsPage() {
                 </Button>
               )}
               {(r.status.Type === "pending" ||
-                r.status.Type === "inProgress") && (
+                r.status.Type === "inProgress" ||
+                r.status.Type === "delivering") && (
                 <Button
                   size="sm"
                   variant="outline"

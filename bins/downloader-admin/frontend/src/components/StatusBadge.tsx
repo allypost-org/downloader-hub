@@ -7,6 +7,7 @@ const MAP: Record<
 > = {
   pending: { label: "Pending", variant: "secondary" },
   inProgress: { label: "In progress", variant: "warning" },
+  delivering: { label: "Delivering", variant: "default" },
   done: { label: "Done", variant: "success" },
   failed: { label: "Failed", variant: "destructive" },
 };

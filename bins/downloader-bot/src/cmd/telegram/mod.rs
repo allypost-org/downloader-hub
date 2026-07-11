@@ -1,6 +1,4 @@
-use std::sync::Arc;
-
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{error, info, instrument, warn};
 
 use super::CmdResult;
 use crate::{
@@ -19,20 +17,11 @@ pub async fn run(config: TelegramConfig) -> CmdResult {
     bot::TelegramBot::init(config.bot);
 
     tokio::task::spawn(async move {
-        loop {
-            if let Err(e) = watch_work_requests().await {
-                warn!(?e, "Work requests watcher exited with error");
-                if let Err(re) = peering::reconnect().await {
-                    warn!(?re, "Failed to re-bootstrap irpc session; will retry");
-                }
-            }
-
-            let about_two_seconds = 2000 + rand::random_range(0..=2000);
-            let about_two_seconds = std::time::Duration::from_millis(about_two_seconds);
-
-            debug!(time = ?about_two_seconds, "Work requests stream finished. Sleeping for a random amount of time...");
-
-            tokio::time::sleep(about_two_seconds).await;
+        // One-shot startup scan: recover in-progress/delivering requests as
+        // supervised per-request watchers. Per-request watches own their own
+        // lifecycles now; there is no persistent snapshot loop.
+        if let Err(e) = startup_scan().await {
+            warn!(?e, "Startup scan exited with error; giving up");
         }
     });
 
@@ -41,42 +30,63 @@ pub async fn run(config: TelegramConfig) -> CmdResult {
         .map_err(anyhow::Error::into_boxed_dyn_error)
 }
 
-async fn watch_work_requests() -> Result<(), anyhow::Error> {
-    debug!("Starting to watch work requests");
-    let mut reqs_it = match RpcClient::work_request_watch_mine_in_progress().await {
-        Ok(x) => x,
-        Err(e) => {
-            error!(?e, "Failed to watch work requests");
-            return Err(e.into());
-        }
-    };
-
-    debug!("Connected to work requests watcher");
-
-    while let Some(snapshot) = match reqs_it.recv().await {
-        Ok(x) => x,
-        Err(e) => {
-            error!(?e, "Got error from work requests watcher");
-            return Err(e.into());
-        }
-    } {
-        for req in snapshot.requests.iter().cloned() {
-            let req = Arc::new(req);
-            let status_message =
-                match bot::helpers::status_message::StatusMessage::from_metadata(req.metadata()) {
-                    Ok(x) => x,
-                    Err(e) => {
-                        error!(?e, "Failed to get status message");
-                        continue;
-                    }
-                };
-
-            tokio::task::spawn(bot::handlers::message::process_work_request(
-                req.clone(),
-                status_message,
-            ));
+/// Startup scan: fetch this bot's in-progress/delivering requests once and
+/// submit each to the keyed supervisor as a recovery watcher. Retried through
+/// the reconnect coordinator until it succeeds or the platform is shutting
+/// down; a central/database failure is never treated as an empty successful
+/// scan.
+async fn startup_scan() -> Result<(), anyhow::Error> {
+    loop {
+        match RpcClient::work_request_list_mine_in_progress().await {
+            Ok(snapshot) => {
+                if let Some(e) = snapshot.error {
+                    warn!(?e, "startup scan returned error; reconnecting");
+                    reconnect_and_backoff().await;
+                    continue;
+                }
+                for req in snapshot.requests.iter() {
+                    recover_request(req).await;
+                }
+                info!(count = snapshot.requests.len(), "startup scan complete");
+                return Ok(());
+            }
+            Err(e) => {
+                error!(?e, "startup scan failed; reconnecting");
+                reconnect_and_backoff().await;
+            }
         }
     }
+}
 
-    Ok(())
+/// Reconstruct the platform delivery object from request metadata and submit
+/// the request to the keyed supervisor. A delivering row starts a recovery
+/// watcher that stays subscribed through lease expiry.
+async fn recover_request(req: &app_peer_comms::message::v1::central::work_request::WorkRequest) {
+    use crate::cmd::telegram::bot::{
+        handlers::delivery::start_request_task, helpers::status_message::StatusMessage,
+    };
+
+    let request_id = req.request_id();
+    let is_recovery = req.status().is_delivering();
+    let status_message = match StatusMessage::from_metadata(req.metadata()) {
+        Ok(x) => x,
+        Err(e) => {
+            error!(
+                ?e,
+                ?request_id,
+                "failed to reconstruct status message for recovery"
+            );
+            return;
+        }
+    };
+    start_request_task(request_id, status_message, is_recovery).await;
+}
+
+/// Reconnect (single-flight) with bounded backoff. Used by the startup scan
+/// when central/database is unavailable.
+async fn reconnect_and_backoff() {
+    if let Err(e) = peering::reconnect().await {
+        warn!(?e, "reconnect failed during startup scan");
+    }
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 }

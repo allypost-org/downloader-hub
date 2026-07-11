@@ -15,15 +15,14 @@ use app_peer_comms::{
         targeted::{TargetedTicket, TicketTarget},
     },
 };
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, trace, warn};
 
-use crate::peering::rpc::RpcClient;
+use crate::peering::{reconnect::set_connect_config, rpc::RpcClient};
 
+pub mod reconnect;
 pub mod rpc;
 
 static HEARTBEAT: OnceLock<()> = OnceLock::new();
-
-static CONNECT_CONFIG: OnceLock<PeerCommsBotTicketFromApiConfig> = OnceLock::new();
 
 pub async fn init_peering_endpoint(
     config: PeerCommsBotConfig,
@@ -72,7 +71,7 @@ pub async fn init_peering_endpoint(
 
     PeeringEndpoint::init(pe)?;
 
-    _ = CONNECT_CONFIG.set(config.ticket.api.clone());
+    set_connect_config(config.ticket.api.clone());
 
     if let Err(e) = RpcClient::init(config.ticket.api.key.clone(), central_addr, capabilities).await
     {
@@ -98,17 +97,10 @@ pub async fn init_peering_endpoint(
     Ok(())
 }
 
-pub async fn reconnect() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let api = CONNECT_CONFIG
-        .get()
-        .ok_or("peering not initialized (no connect config)")?;
-    info!(target: PeeringEndpoint::trace_span_name(), "Re-bootstrapping: re-fetching join-ticket from central API");
-    let ticket = fetch_ticket_from_api(api.clone()).await?;
-    let central_addr = ticket.main.clone();
-    RpcClient::reauth(central_addr).await?;
-    info!(target: PeeringEndpoint::trace_span_name(), "Re-authenticated irpc session against central");
-    Ok(())
-}
+/// Re-export the single-flight reconnect coordinator so existing
+/// `crate::peering::reconnect()` call sites keep working while now coalescing
+/// concurrent reconnects across all request tasks and the heartbeat.
+pub use reconnect::reconnect;
 
 async fn get_ticket(
     config: PeerCommsBotTicketConfig,
@@ -123,7 +115,7 @@ async fn get_ticket(
     fetch_ticket_from_api(config.api).await
 }
 
-async fn fetch_ticket_from_api(
+pub async fn fetch_ticket_from_api(
     api: PeerCommsBotTicketFromApiConfig,
 ) -> Result<Ticket, Box<dyn std::error::Error + Send + Sync>> {
     Ok(app_peer_comms::ticket::fetch_join_ticket(&api.url, &api.key, TicketTarget::Bot).await?)

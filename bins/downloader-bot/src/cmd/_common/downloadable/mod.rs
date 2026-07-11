@@ -5,6 +5,7 @@ pub mod impls;
 pub trait Downloadable {
     type Error;
 
+    #[allow(dead_code)]
     fn get_suggested_name(&self) -> Option<Arc<str>> {
         None
     }

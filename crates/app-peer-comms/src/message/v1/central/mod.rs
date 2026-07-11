@@ -1,10 +1,15 @@
+pub mod ack_delivery_result;
 pub mod add_errors_result;
 pub mod create_result;
+pub mod fail_delivery_result;
 pub mod fail_result;
+pub mod finish_delivery_result;
 pub mod finish_result;
 pub mod get_work_item_result;
 pub mod move_to_waiting_for_requester_result;
+pub mod release_delivery_result;
 pub mod take_result;
 pub mod update_status_message_result;
 pub mod work_request;
 pub mod work_request_snapshot;
+pub mod work_request_watch_event;

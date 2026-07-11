@@ -95,10 +95,24 @@ pub enum RequestStatus {
         files_data: Option<String>,
     },
     #[serde(rename_all = "camelCase")]
+    Delivering {
+        #[serde(with = "crate::helpers::serde::bigint")]
+        since: u64,
+        #[serde(with = "crate::helpers::serde::bigint")]
+        worker_since: u64,
+        worker_by: String,
+        claimed_by: String,
+        delivery_attempt_id: String,
+        message: Option<String>,
+        files_data: Option<String>,
+    },
+    #[serde(rename_all = "camelCase")]
     Done {
         #[serde(with = "crate::helpers::serde::bigint")]
         at: u64,
         by: String,
+        #[serde(default)]
+        delivered_by: Option<String>,
     },
     #[serde(rename_all = "camelCase")]
     Failed {
@@ -173,6 +187,33 @@ impl Database {
     > {
         DatabaseRequest::named("requests:get")
             .with_arg("requestId", request_id.as_ref())
+            .watch_query(self)
+            .await
+    }
+
+    pub async fn requests_get_mine_by_id(
+        &self,
+        request_id: Arc<str>,
+        requester_id: Arc<str>,
+    ) -> Result<Option<RequestInfoResponse>, DatabaseError> {
+        DatabaseRequest::named("requests:getMineById")
+            .with_arg("requestId", request_id.as_ref())
+            .with_arg("requesterId", requester_id.as_ref())
+            .query(self)
+            .await
+    }
+
+    pub async fn requests_watch_mine_by_id(
+        &self,
+        request_id: Arc<str>,
+        requester_id: Arc<str>,
+    ) -> Result<
+        impl futures::stream::Stream<Item = Result<Option<RequestInfoResponse>, ResponseError>>,
+        DatabaseError,
+    > {
+        DatabaseRequest::named("requests:getMineById")
+            .with_arg("requestId", request_id.as_ref())
+            .with_arg("requesterId", requester_id.as_ref())
             .watch_query(self)
             .await
     }
@@ -429,6 +470,111 @@ impl Database {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "code")]
+pub enum AckDeliveryResult {
+    RequestNotFound,
+    RequestNotSubmittedByYou,
+    NotWaitingForRequester,
+    AlreadyDelivering,
+    #[serde(rename_all = "camelCase")]
+    Claimed {
+        delivery_attempt_id: String,
+        #[serde(default)]
+        files_data: Option<String>,
+    },
+}
+impl Database {
+    pub async fn requests_ack_delivery(
+        &self,
+        request_id: Arc<str>,
+        requester_id: Arc<str>,
+    ) -> Result<AckDeliveryResult, DatabaseError> {
+        DatabaseRequest::named("requests:ackDelivery")
+            .with_arg("requestId", request_id.as_ref())
+            .with_arg("requesterId", requester_id.as_ref())
+            .mutate(self)
+            .await
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "code")]
+pub enum FinishDeliveryResult {
+    RequestNotFound,
+    RequestNotSubmittedByYou,
+    NotDelivering,
+    StaleAttempt,
+    Ok,
+}
+impl Database {
+    pub async fn requests_finish_delivery(
+        &self,
+        request_id: Arc<str>,
+        requester_id: Arc<str>,
+        delivery_attempt_id: Arc<str>,
+    ) -> Result<FinishDeliveryResult, DatabaseError> {
+        DatabaseRequest::named("requests:finishDelivery")
+            .with_arg("requestId", request_id.as_ref())
+            .with_arg("requesterId", requester_id.as_ref())
+            .with_arg("deliveryAttemptId", delivery_attempt_id.as_ref())
+            .mutate(self)
+            .await
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "code")]
+pub enum FailDeliveryResult {
+    RequestNotFound,
+    RequestNotSubmittedByYou,
+    NotDelivering,
+    StaleAttempt,
+    Failed,
+}
+impl Database {
+    pub async fn requests_fail_delivery(
+        &self,
+        request_id: Arc<str>,
+        requester_id: Arc<str>,
+        delivery_attempt_id: Arc<str>,
+        reason: &str,
+    ) -> Result<FailDeliveryResult, DatabaseError> {
+        DatabaseRequest::named("requests:failDelivery")
+            .with_arg("requestId", request_id.as_ref())
+            .with_arg("requesterId", requester_id.as_ref())
+            .with_arg("deliveryAttemptId", delivery_attempt_id.as_ref())
+            .with_arg("reason", reason)
+            .mutate(self)
+            .await
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "code")]
+pub enum ReleaseDeliveryResult {
+    RequestNotFound,
+    RequestNotSubmittedByYou,
+    NotDelivering,
+    StaleAttempt,
+    Released,
+}
+impl Database {
+    pub async fn requests_release_delivery(
+        &self,
+        request_id: Arc<str>,
+        requester_id: Arc<str>,
+        delivery_attempt_id: Arc<str>,
+    ) -> Result<ReleaseDeliveryResult, DatabaseError> {
+        DatabaseRequest::named("requests:releaseDelivery")
+            .with_arg("requestId", request_id.as_ref())
+            .with_arg("requesterId", requester_id.as_ref())
+            .with_arg("deliveryAttemptId", delivery_attempt_id.as_ref())
+            .mutate(self)
+            .await
+    }
+}
+
 impl Database {
     pub async fn requests_get_mine_in_progress(
         &self,
@@ -523,6 +669,7 @@ fn status_by_status_request(
 pub enum RequestStatusType {
     Pending,
     InProgress,
+    Delivering,
     Done,
     Failed,
 }
@@ -533,6 +680,7 @@ impl RequestStatusType {
         match self {
             Self::Pending => "pending",
             Self::InProgress => "inProgress",
+            Self::Delivering => "delivering",
             Self::Done => "done",
             Self::Failed => "failed",
         }
@@ -546,6 +694,8 @@ pub struct RequestCounts {
     pub pending: u64,
     #[serde(with = "crate::helpers::serde::bigint")]
     pub in_progress: u64,
+    #[serde(with = "crate::helpers::serde::bigint")]
+    pub delivering: u64,
     #[serde(with = "crate::helpers::serde::bigint")]
     pub done: u64,
     #[serde(with = "crate::helpers::serde::bigint")]

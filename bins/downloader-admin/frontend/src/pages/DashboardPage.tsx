@@ -3,7 +3,7 @@ import { api, type RequestStatusType } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/StatusBadge";
 
-const COUNTS: RequestStatusType[] = ["pending", "inProgress", "failed", "done"];
+const COUNTS: RequestStatusType[] = ["pending", "inProgress", "delivering", "failed", "done"];
 
 function toNumber(v: string | number): number {
   return typeof v === "number" ? v : Number(v);

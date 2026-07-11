@@ -5,11 +5,14 @@ use irpc::{
 use serde::{Deserialize, Serialize};
 
 use crate::message::v1::central::{
-    add_errors_result::AddErrorsResult, create_result::CreateResult, fail_result::FailResult,
+    ack_delivery_result::WorkRequestAckResult, add_errors_result::AddErrorsResult,
+    create_result::CreateResult, fail_delivery_result::WorkRequestFailDeliveryResult,
+    fail_result::FailResult, finish_delivery_result::WorkRequestFinishDeliveryResult,
     finish_result::FinishResult, get_work_item_result::GetWorkItemResult,
-    move_to_waiting_for_requester_result::MoveToWaitingForRequesterResult, take_result::FreeResult,
+    move_to_waiting_for_requester_result::MoveToWaitingForRequesterResult,
+    release_delivery_result::WorkRequestReleaseDeliveryResult, take_result::FreeResult,
     update_status_message_result::UpdateStatusMessageResult,
-    work_request_snapshot::WorkRequestSnapshot,
+    work_request_snapshot::WorkRequestSnapshot, work_request_watch_event::WorkRequestWatchEvent,
 };
 
 pub mod auth_result;
@@ -63,4 +66,17 @@ pub enum CentralProtocol {
 
     #[rpc(tx = oneshot::Sender<request::AccountsUpsertResult>)]
     AccountsUpsert(request::AccountsUpsert),
+
+    #[rpc(tx = mpsc::Sender<WorkRequestWatchEvent>)]
+    WorkRequestWait(request::WorkRequestWait),
+    #[rpc(tx = oneshot::Sender<WorkRequestAckResult>)]
+    WorkRequestAck(request::WorkRequestAck),
+    #[rpc(tx = oneshot::Sender<WorkRequestFinishDeliveryResult>)]
+    WorkRequestFinishDelivery(request::WorkRequestFinishDelivery),
+    #[rpc(tx = oneshot::Sender<WorkRequestReleaseDeliveryResult>)]
+    WorkRequestReleaseDelivery(request::WorkRequestReleaseDelivery),
+    #[rpc(tx = oneshot::Sender<WorkRequestSnapshot>)]
+    WorkRequestListMineInProgress(request::WorkRequestListMineInProgress),
+    #[rpc(tx = oneshot::Sender<WorkRequestFailDeliveryResult>)]
+    WorkRequestFailDelivery(request::WorkRequestFailDelivery),
 }

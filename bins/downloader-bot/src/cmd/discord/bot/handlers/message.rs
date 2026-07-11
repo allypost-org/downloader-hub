@@ -14,6 +14,7 @@ use url::Url;
 use crate::{
     cmd::discord::bot::{
         discord_bot::DiscordBot,
+        handlers::delivery::start_request_task,
         helpers::{account, status_message::StatusMessage},
     },
     peering::rpc::RpcClient,
@@ -124,6 +125,10 @@ pub async fn handle_download_request(ctx: &Context, msg: &Message, mut urls: Vec
         url_status_message
             .update_message(&format!("Request added to queue with ID `{}`", result.id))
             .await;
+
+        // Start a supervised per-request watcher for this freshly created
+        // request. Not a recovery task (it was just created).
+        start_request_task(result.id.clone(), url_status_message, false).await;
 
         added_some = true;
     }

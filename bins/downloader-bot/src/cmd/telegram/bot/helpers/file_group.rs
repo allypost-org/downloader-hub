@@ -15,11 +15,13 @@ use tracing::trace;
 
 use crate::cmd::telegram::bot::TelegramBot;
 
+type MediaGroup = (Vec<InputMedia>, Vec<PathBuf>);
+
 #[tracing::instrument(skip_all)]
 pub async fn files_to_input_media_groups<TFiles, TFile>(
     files: TFiles,
     max_size: u64,
-) -> (Vec<Vec<InputMedia>>, Vec<(PathBuf, String)>)
+) -> (Vec<MediaGroup>, Vec<(PathBuf, String)>)
 where
     TFiles: IntoIterator<Item = TFile> + Send + std::fmt::Debug,
     TFile: AsRef<Path>,
@@ -95,11 +97,14 @@ where
     for group in chunkable_groups {
         let (chunks, failed_inner) = chunk(group, max_size);
         failed.extend(failed_inner);
-        res.extend(
-            chunks
-                .into_iter()
-                .map(|x| x.into_iter().map(|x| x.media).collect()),
-        );
+        res.extend(chunks.into_iter().map(|chunk| {
+            let paths = chunk
+                .iter()
+                .map(|item| item.file_info.path.clone())
+                .collect();
+            let media = chunk.into_iter().map(|item| item.media).collect();
+            (media, paths)
+        }));
     }
     trace!(?res, "Got file groupings");
 

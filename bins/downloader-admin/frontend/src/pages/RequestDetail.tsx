@@ -105,6 +105,9 @@ export function RequestDetail({
           }
         />
         {status.by && <Field label="By" value={authedLabel(status.by)} />}
+        {status.deliveredBy && (
+          <Field label="Delivered by" value={authedLabel(status.deliveredBy)} />
+        )}
         {status.reason && <Field label="Reason" value={status.reason} />}
         {status.message && <Field label="Message" value={status.message} />}
         {req.idempotencyKey && (
@@ -161,7 +164,9 @@ export function RequestDetail({
               Retry
             </Button>
           )}
-          {(status.Type === "pending" || status.Type === "inProgress") && (
+          {(status.Type === "pending" ||
+            status.Type === "inProgress" ||
+            status.Type === "delivering") && (
             <Button
               size="sm"
               variant="outline"

@@ -29,6 +29,24 @@ export const requestDone = {
   Type: v.literal("done"),
   at: v.int64(),
   by: v.id(authedId),
+  // bot that delivered the files; absent on legacy rows and on worker-direct done.
+  deliveredBy: v.optional(v.id(authedId)),
+};
+
+export const requestDelivering = {
+  Type: v.literal("delivering"),
+  // when the delivery lease started (the claim time).
+  since: v.int64(),
+  // worker attribution carried over from the in-progress state.
+  workerSince: v.int64(),
+  workerBy: v.id(authedId),
+  // bot that claimed this delivery attempt.
+  claimedBy: v.id(authedId),
+  // random fence token; only the current attempt may finish/release/clean up.
+  deliveryAttemptId: v.string(),
+  message: v.optional(v.string()),
+  filesData: v.optional(v.string()),
+  CleanupId: v.id("_scheduled_functions"),
 };
 
 export const requestFailed = {
@@ -63,6 +81,7 @@ export const requests = {
   status: v.union(
     v.object(requestPending),
     v.object(requestInProgress),
+    v.object(requestDelivering),
     v.object(requestDone),
     v.object(requestFailed),
   ),
