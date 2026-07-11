@@ -6,6 +6,7 @@ use crate::message::v1::common::file::{FileReference, FileReferenceError};
 #[serde(rename_all = "camelCase")]
 pub enum WorkRequestInfo {
     DownloadAndFix(FileReference),
+    RefreshAccountInfo(app_database::entity::requests::request_info::RefreshAccountInfoPayload),
 }
 
 impl TryFrom<app_database::entity::requests::request_info::RequestInfo> for WorkRequestInfo {
@@ -21,6 +22,9 @@ impl TryFrom<app_database::entity::requests::request_info::RequestInfo> for Work
                 .try_into()
                 .map(Self::DownloadAndFix)
                 .map_err(Into::into),
+            app_database::entity::requests::request_info::RequestInfo::RefreshAccountInfo(payload) => {
+                Ok(Self::RefreshAccountInfo(payload))
+            }
         }
     }
 }

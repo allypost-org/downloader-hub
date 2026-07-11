@@ -4,7 +4,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use app_database::{Database, api::authed::AuthedInfoResponse, entity::authed::AuthedForRole};
+use app_database::{
+    Database,
+    api::authed::AuthedInfoResponse,
+    entity::{accounts::Platform, authed::AuthedForRole},
+};
 use app_peer_comms::{
     IrohAcceptError as AcceptError, IrohConnection as Connection,
     IrohProtocolHandler as ProtocolHandler,
@@ -13,11 +17,13 @@ use app_peer_comms::{
     message::v1::central::{
         ack_delivery_result::WorkRequestAckResult,
         add_errors_result::{AddErrorsResult, AddErrorsResultStatus},
+        complete_account_refresh_result::CompleteAccountRefreshResult,
         create_result::{CreateResult, CreateResultData},
         fail_delivery_result::WorkRequestFailDeliveryResult,
         fail_result::{FailResult, FailResultStatus},
         finish_delivery_result::WorkRequestFinishDeliveryResult,
         finish_result::FinishResult,
+        get_account_refresh_item_result::GetAccountRefreshItemResult,
         get_work_item_result::GetWorkItemResult,
         move_to_waiting_for_requester_result::{
             MoveToWaitingForRequesterResult, MoveToWaitingForRequesterResultStatus,
@@ -620,6 +626,83 @@ impl CentralRpcServer {
                                 places: 0,
                             })
                             .await;
+                    }
+                }
+            }
+            CentralRequest::GetAccountRefreshItem(r) => {
+                let WithChannels { inner, tx, .. } = r;
+                if !is_bot {
+                    let _ = tx.send(GetAccountRefreshItemResult::Unauthorized).await;
+                    return;
+                }
+                let platform = match inner.platform.parse::<Platform>() {
+                    Ok(p) => p,
+                    Err(e) => {
+                        error!(?e, platform = %inner.platform, "invalid platform on GetAccountRefreshItem");
+                        let _ = tx.send(GetAccountRefreshItemResult::BackendError).await;
+                        return;
+                    }
+                };
+                match Database::global()
+                    .requests_get_available_account_refresh(platform)
+                    .await
+                {
+                    Ok(items) => {
+                        for item in items.iter() {
+                            let req_id = item.request_id.clone();
+                            match Database::global()
+                                .requests_take(req_id.clone(), authed_id.clone())
+                                .await
+                            {
+                                Ok(app_database::api::requests::TakeResult::Ok(box_req)) => {
+                                    match box_req.as_ref().try_into() {
+                                        Ok(wr) => {
+                                            let _ = tx
+                                                .send(GetAccountRefreshItemResult::Ok(Box::new(wr)))
+                                                .await;
+                                            return;
+                                        }
+                                        Err(e) => {
+                                            error!(?e, ?req_id, "account refresh convert failed; releasing");
+                                            let _ = Database::global()
+                                                .requests_free(req_id, authed_id.clone())
+                                                .await;
+                                        }
+                                    }
+                                }
+                                Ok(_) => continue,
+                                Err(e) => {
+                                    error!(?e, "account refresh take failed");
+                                    let _ = tx.send(GetAccountRefreshItemResult::BackendError).await;
+                                    return;
+                                }
+                            }
+                        }
+                        let _ = tx.send(GetAccountRefreshItemResult::NoWork).await;
+                    }
+                    Err(e) => {
+                        error!(?e, "getAvailableAccountRefresh failed");
+                        let _ = tx.send(GetAccountRefreshItemResult::BackendError).await;
+                    }
+                }
+            }
+            CentralRequest::CompleteAccountRefresh(r) => {
+                let WithChannels { inner, tx, .. } = r;
+                if !is_bot {
+                    let _ = tx.send(CompleteAccountRefreshResult::Unauthorized).await;
+                    return;
+                }
+                match Database::global()
+                    .requests_complete_account_refresh(inner.request_id.clone(), authed_id)
+                    .await
+                {
+                    Ok(db_result) => {
+                        let wire: CompleteAccountRefreshResult = db_result.into();
+                        let _ = tx.send(wire).await;
+                    }
+                    Err(e) => {
+                        error!(?e, "completeAccountRefresh failed");
+                        let _ = tx.send(CompleteAccountRefreshResult::BackendError).await;
                     }
                 }
             }

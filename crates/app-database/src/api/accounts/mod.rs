@@ -150,6 +150,26 @@ impl Database {
             .await
     }
 
+    pub async fn accounts_get_user(
+        &self,
+        id: &str,
+    ) -> Result<Option<AccountUserInfo>, DatabaseError> {
+        DatabaseRequest::named("accounts:getUser")
+            .with_arg("id", id)
+            .query(self)
+            .await
+    }
+
+    pub async fn accounts_get_place(
+        &self,
+        id: &str,
+    ) -> Result<Option<AccountPlaceInfo>, DatabaseError> {
+        DatabaseRequest::named("accounts:getPlace")
+            .with_arg("id", id)
+            .query(self)
+            .await
+    }
+
     /// Live subscription to the projection backing the admin stream's
     /// name-resolution map.
     pub async fn accounts_watch_for_stream(

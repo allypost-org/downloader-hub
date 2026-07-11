@@ -6,9 +6,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::message::v1::central::{
     ack_delivery_result::WorkRequestAckResult, add_errors_result::AddErrorsResult,
+    complete_account_refresh_result::CompleteAccountRefreshResult,
     create_result::CreateResult, fail_delivery_result::WorkRequestFailDeliveryResult,
     fail_result::FailResult, finish_delivery_result::WorkRequestFinishDeliveryResult,
-    finish_result::FinishResult, get_work_item_result::GetWorkItemResult,
+    finish_result::FinishResult, get_account_refresh_item_result::GetAccountRefreshItemResult,
+    get_work_item_result::GetWorkItemResult,
     move_to_waiting_for_requester_result::MoveToWaitingForRequesterResult,
     release_delivery_result::WorkRequestReleaseDeliveryResult, take_result::FreeResult,
     update_status_message_result::UpdateStatusMessageResult,
@@ -66,6 +68,11 @@ pub enum CentralProtocol {
 
     #[rpc(tx = oneshot::Sender<request::AccountsUpsertResult>)]
     AccountsUpsert(request::AccountsUpsert),
+
+    #[rpc(tx = oneshot::Sender<GetAccountRefreshItemResult>)]
+    GetAccountRefreshItem(request::GetAccountRefreshItem),
+    #[rpc(tx = oneshot::Sender<CompleteAccountRefreshResult>)]
+    CompleteAccountRefresh(request::CompleteAccountRefresh),
 
     #[rpc(tx = mpsc::Sender<WorkRequestWatchEvent>)]
     WorkRequestWait(request::WorkRequestWait),

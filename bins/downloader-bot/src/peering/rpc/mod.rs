@@ -3,22 +3,27 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use app_database::entity::accounts::{AccountPlaceRef, AccountUserRef};
 use app_peer_comms::{
     IrohEndpointAddr, PeeringEndpoint, irpc, irpc_iroh,
     message::v1::{
         central::{
             ack_delivery_result::WorkRequestAckResult, create_result::CreateResult,
+            complete_account_refresh_result::CompleteAccountRefreshResult,
             fail_delivery_result::WorkRequestFailDeliveryResult,
+            fail_result::FailResult,
             finish_delivery_result::WorkRequestFinishDeliveryResult, finish_result::FinishResult,
+            get_account_refresh_item_result::GetAccountRefreshItemResult,
             release_delivery_result::WorkRequestReleaseDeliveryResult,
+            take_result::FreeResult,
             work_request_snapshot::WorkRequestSnapshot,
             work_request_watch_event::WorkRequestWatchEvent,
+            add_errors_result::AddErrorsResult,
         },
         common::request_info::RequestInfo,
     },
     rpc::{AuthResult, CentralProtocol, RPC_ALPN, request},
 };
+use app_database::entity::accounts::{AccountPlaceRef, AccountUserRef, Platform};
 use arc_swap::ArcSwapOption;
 
 pub struct RpcClient {
@@ -154,6 +159,48 @@ impl RpcClient {
     ) -> Result<request::AccountsUpsertResult, irpc::Error> {
         Self::client()
             .rpc(request::AccountsUpsert { users, places })
+            .await
+    }
+
+    pub async fn get_account_refresh_item(
+        platform: Platform,
+    ) -> Result<GetAccountRefreshItemResult, irpc::Error> {
+        Self::client()
+            .rpc(request::GetAccountRefreshItem {
+                platform: platform.as_str().to_string(),
+            })
+            .await
+    }
+
+    pub async fn complete_account_refresh(
+        request_id: Arc<str>,
+    ) -> Result<CompleteAccountRefreshResult, irpc::Error> {
+        Self::client()
+            .rpc(request::CompleteAccountRefresh { request_id })
+            .await
+    }
+
+    pub async fn work_request_add_errors(
+        request_id: Arc<str>,
+        errors: Vec<String>,
+    ) -> Result<AddErrorsResult, irpc::Error> {
+        Self::client()
+            .rpc(request::WorkRequestAddErrors { request_id, errors })
+            .await
+    }
+
+    pub async fn work_request_fail(
+        request_id: Arc<str>,
+        reason: Arc<str>,
+    ) -> Result<FailResult, irpc::Error> {
+        Self::client()
+            .rpc(request::WorkRequestFail { request_id, reason })
+            .await
+    }
+
+    pub async fn work_request_free(request_id: Arc<str>) -> Result<FreeResult, irpc::Error> {
+        Self::client()
+            .rpc(request::WorkRequestFree { request_id })
             .await
     }
 

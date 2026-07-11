@@ -109,6 +109,7 @@ async fn can_process(work_request: &WorkRequest) -> bool {
         WorkRequestInfo::DownloadAndFix(file_reference) => {
             can_process_download_and_fix(file_reference).await
         }
+        WorkRequestInfo::RefreshAccountInfo(_) => false,
     }
 }
 

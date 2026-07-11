@@ -585,6 +585,28 @@ export function AccountsPage() {
     },
   });
 
+  const refreshStale = useMutation({
+    mutationFn: () => api.refreshStaleAccounts(),
+    onSuccess: (res) => {
+      void qc.invalidateQueries({ queryKey: ["requests"] });
+      window.alert(`Enqueued ${res.enqueued} account refresh request(s).`);
+    },
+  });
+
+  const refreshUser = useMutation({
+    mutationFn: (id: string) => api.refreshAccountUser(id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["requests"] });
+    },
+  });
+
+  const refreshPlace = useMutation({
+    mutationFn: (id: string) => api.refreshAccountPlace(id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["requests"] });
+    },
+  });
+
   const userColumns: ColumnDef<AccountUserInfo>[] = [
     {
       accessorKey: "platform",
@@ -635,6 +657,14 @@ export function AccountsPage() {
       enableSorting: false,
       cell: ({ row }) => (
         <div className="flex justify-end gap-1 text-right">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={readonly || refreshUser.isPending}
+            onClick={() => refreshUser.mutate(row.original.id)}
+          >
+            Refresh
+          </Button>
           <Button
             size="sm"
             variant="outline"
@@ -727,6 +757,14 @@ export function AccountsPage() {
           <Button
             size="sm"
             variant="outline"
+            disabled={readonly || refreshPlace.isPending}
+            onClick={() => refreshPlace.mutate(row.original.id)}
+          >
+            Refresh
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
             onClick={() =>
               setRequestsTarget({
                 kind: "place",
@@ -754,29 +792,48 @@ export function AccountsPage() {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center justify-between">
+          <CardTitle className="flex flex-wrap items-center justify-between gap-2">
             <span>Accounts</span>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={readonly || backfill.isPending}
-              onClick={() => {
-                if (
-                  window.confirm(
-                    "Backfill orderedBy/orderedIn on existing requests from idempotency keys + stored metadata? Discord fully, Telegram DMs fully, Telegram groups orderedIn-only (the ordering user is unrecoverable). Runs in the background on the backend.",
-                  )
-                ) {
-                  backfill.mutate();
-                }
-              }}
-            >
-              {backfill.isPending ? "Starting…" : "Backfill refs"}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={readonly || refreshStale.isPending}
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      "Enqueue refresh requests for accounts missing usernames/display names (users) or names (places)? Bots fetch metadata from Telegram/Discord when they pick up each job.",
+                    )
+                  ) {
+                    refreshStale.mutate();
+                  }
+                }}
+              >
+                {refreshStale.isPending ? "Starting…" : "Refresh stale"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={readonly || backfill.isPending}
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      "Backfill orderedBy/orderedIn on existing requests from idempotency keys + stored metadata? Discord fully, Telegram DMs fully, Telegram groups orderedIn-only (the ordering user is unrecoverable). Runs in the background on the backend.",
+                    )
+                  ) {
+                    backfill.mutate();
+                  }
+                }}
+              >
+                {backfill.isPending ? "Starting…" : "Backfill refs"}
+              </Button>
+            </div>
           </CardTitle>
           <p className="text-sm text-muted-foreground">
             End-users and chats/servers seen by the bots. Refreshed by bots on
             each message — metadata for inactive entities may be stale. Use
-            “Edit” to correct a row manually and manage its restrictions.
+            “Refresh” to queue a bot metadata fetch, “Edit” to correct a row
+            manually, and manage restrictions from the edit dialog.
           </p>
         </CardHeader>
         <CardContent>

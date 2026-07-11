@@ -1,5 +1,7 @@
 use tracing::{error, info, instrument, warn};
 
+use app_database::entity::accounts::Platform;
+
 use super::CmdResult;
 use crate::{
     cmd::telegram::config::TelegramConfig,
@@ -23,6 +25,15 @@ pub async fn run(config: TelegramConfig) -> CmdResult {
         if let Err(e) = startup_scan().await {
             warn!(?e, "Startup scan exited with error; giving up");
         }
+    });
+
+    tokio::task::spawn(async {
+        crate::cmd::_common::account_refresh::run_refresh_loop(
+            Platform::Telegram,
+            bot::helpers::account::fetch_user_fut,
+            bot::helpers::account::fetch_place_fut,
+        )
+        .await;
     });
 
     bot::TelegramBot::run()

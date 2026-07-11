@@ -135,6 +135,18 @@ pub struct AccountsUpsertResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GetAccountRefreshItem {
+    pub platform: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompleteAccountRefresh {
+    pub request_id: RequestId,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkRequestComplete {
     pub request_id: RequestId,
 }

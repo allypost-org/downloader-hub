@@ -155,6 +155,24 @@ export const listUsers = query({
   },
 });
 
+export const getUser = query({
+  args: { id: v.id(accountUserId) },
+  returns: v.union(accountUserReturn, v.null()),
+  handler: async (ctx, args) => {
+    const row = await ctx.db.get(args.id);
+    if (!row) return null;
+    return {
+      id: row._id,
+      platform: row.platform,
+      platformId: row.platformId,
+      username: row.username,
+      displayName: row.displayName,
+      isBot: row.isBot,
+      lastSeen: row.lastSeen,
+    };
+  },
+});
+
 export const listPlaces = query({
   args: {},
   returns: v.array(accountPlaceReturn),
@@ -170,6 +188,25 @@ export const listPlaces = query({
       parentPlatformId: row.parentPlatformId,
       lastSeen: row.lastSeen,
     }));
+  },
+});
+
+export const getPlace = query({
+  args: { id: v.id(accountPlaceId) },
+  returns: v.union(accountPlaceReturn, v.null()),
+  handler: async (ctx, args) => {
+    const row = await ctx.db.get(args.id);
+    if (!row) return null;
+    return {
+      id: row._id,
+      platform: row.platform,
+      platformId: row.platformId,
+      kind: row.kind,
+      name: row.name,
+      username: row.username,
+      parentPlatformId: row.parentPlatformId,
+      lastSeen: row.lastSeen,
+    };
   },
 });
 

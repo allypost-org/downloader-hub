@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use app_database::entity::accounts::Platform;
 use serenity::{Client, all::GatewayIntents};
 use tracing::{debug, error, info, instrument};
 
@@ -53,6 +54,15 @@ pub async fn run(config: DiscordConfig) -> CmdResult {
         .await?;
 
     DiscordBot::init(client.http.clone(), bot_config);
+
+    tokio::task::spawn(async {
+        crate::cmd::_common::account_refresh::run_refresh_loop(
+            Platform::Discord,
+            bot::helpers::account::fetch_user_fut,
+            bot::helpers::account::fetch_place_fut,
+        )
+        .await;
+    });
 
     if let Err(e) = client.start_autosharded().await {
         error!(?e, "Failed to start discord bot");

@@ -13,6 +13,7 @@ import schema, {
   requestFailed,
   requestDelivering,
   requestInProgress,
+  requestWorkKind,
   requests,
   requestsId,
 } from "./schema";
@@ -110,6 +111,7 @@ export const add = mutation({
     requesterId: requests.requester,
     metadata: requests.metadata,
     idempotencyKey: requests.idempotencyKey,
+    workKind: v.optional(requestWorkKind),
     orderedBy: v.optional(accountUserRef),
     orderedIn: v.optional(accountPlaceRef),
   },
@@ -141,6 +143,7 @@ export const add = mutation({
       info: args.info,
       requester: args.requesterId,
       metadata: args.metadata,
+      workKind: args.workKind,
       tries: 0n,
       idempotencyKey: args.idempotencyKey,
       status: {
@@ -199,22 +202,84 @@ export const getAllAvailable = query({
       .order("asc")
       .collect();
 
-    return rows.map((row) => ({
-      requestId: row._id,
-      requester: row.requester,
-      info: row.info,
-      metadata: row.metadata,
-      status: row.status,
-      errors: row.errors,
-      refusedBy: row.refusedBy ?? [],
-      idempotencyKey: row.idempotencyKey,
-      lastModified: row.lastModified,
-      createdAt: row._creationTime,
-      orderedBy: row.orderedBy,
-      orderedIn: row.orderedIn,
-    }));
+    return rows
+      .filter((row) => row.workKind !== "accountRefresh")
+      .map((row) => ({
+        requestId: row._id,
+        requester: row.requester,
+        info: row.info,
+        metadata: row.metadata,
+        status: row.status,
+        errors: row.errors,
+        refusedBy: row.refusedBy ?? [],
+        idempotencyKey: row.idempotencyKey,
+        lastModified: row.lastModified,
+        createdAt: row._creationTime,
+        orderedBy: row.orderedBy,
+        orderedIn: row.orderedIn,
+      }));
   },
 });
+
+export const getAvailableAccountRefresh = query({
+  args: {
+    platform: accountUserRef.fields.platform,
+  },
+  returns: v.array(v.object(requestDataReturn)),
+  handler: async (ctx, args) => {
+    const rows = await ctx.db
+      .query(requestsId)
+      .withIndex("by_status_work_kind", (q) =>
+        q.eq("status.Type", "pending").eq("workKind", "accountRefresh"),
+      )
+      .order("asc")
+      .collect();
+
+    return rows
+      .filter((row) => refreshTargetsPlatform(row.info, args.platform))
+      .map((row) => ({
+        requestId: row._id,
+        requester: row.requester,
+        info: row.info,
+        metadata: row.metadata,
+        status: row.status,
+        errors: row.errors,
+        refusedBy: row.refusedBy ?? [],
+        idempotencyKey: row.idempotencyKey,
+        lastModified: row.lastModified,
+        createdAt: row._creationTime,
+        orderedBy: row.orderedBy,
+        orderedIn: row.orderedIn,
+      }));
+  },
+});
+
+type RefreshPlatform = "telegram" | "discord";
+
+function refreshTargetsPlatform(
+  info: string,
+  platform: RefreshPlatform,
+): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(info);
+  } catch {
+    return false;
+  }
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const payload = (parsed as Record<string, unknown>).refreshAccountInfo;
+  if (typeof payload !== "object" || payload === null) return false;
+  const raw = payload as Record<string, unknown>;
+  const users = Array.isArray(raw.users) ? raw.users : [];
+  const places = Array.isArray(raw.places) ? raw.places : [];
+  const refs = [...users, ...places];
+  if (refs.length === 0) return false;
+  return refs.every((ref) => {
+    if (typeof ref !== "object" || ref === null) return false;
+    const r = ref as Record<string, unknown>;
+    return r.platform === platform;
+  });
+}
 
 const FAILED_GRACE_WINDOW_MS = 60_000;
 
@@ -938,6 +1003,84 @@ export const finish = mutation({
       return {
         ok: false,
         code: "RequestNotSubmittedByYou",
+      } as const;
+    }
+
+    await ctx.db.patch(args.requestId, {
+      status: {
+        Type: "done",
+        at: BigInt(Date.now()),
+        by: row.status.by,
+      },
+      lastModified: BigInt(Date.now()),
+    });
+
+    if (row.status.CleanupId) {
+      await ctx.scheduler.cancel(row.status.CleanupId);
+    }
+
+    return {
+      ok: true,
+      code: "Ok",
+    } as const;
+  },
+});
+
+export const completeAccountRefresh = mutation({
+  args: {
+    requestId: v.id(requestsId),
+    takerId: requestInProgress.by,
+  },
+  returns: v.union(
+    v.object({
+      ok: v.literal(false),
+      code: v.literal("RequestNotFound"),
+    }),
+    v.object({
+      ok: v.literal(false),
+      code: v.literal("RequestNotInProgress"),
+    }),
+    v.object({
+      ok: v.literal(false),
+      code: v.literal("RequestNotTakenByYou"),
+    }),
+    v.object({
+      ok: v.literal(false),
+      code: v.literal("WrongWorkKind"),
+    }),
+    v.object({
+      ok: v.literal(true),
+      code: v.literal("Ok"),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const row = await ctx.db.get(args.requestId);
+
+    if (!row) {
+      return {
+        ok: false,
+        code: "RequestNotFound",
+      } as const;
+    }
+
+    if (row.workKind !== "accountRefresh") {
+      return {
+        ok: false,
+        code: "WrongWorkKind",
+      } as const;
+    }
+
+    if (row.status.Type !== "inProgress") {
+      return {
+        ok: false,
+        code: "RequestNotInProgress",
+      } as const;
+    }
+
+    if (row.status.by !== args.takerId) {
+      return {
+        ok: false,
+        code: "RequestNotTakenByYou",
       } as const;
     }
 

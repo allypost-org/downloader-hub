@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { AccountRef, RequestInfoResponse } from "@/lib/api";
 import { api } from "@/lib/api";
 import { isRequestParked } from "@/lib/requestParked";
+import { requestKindFromInfo, requestKindLabel } from "@/lib/requestKind";
 import { useAccountNames } from "@/lib/useAccountNames";
 import { useAuthStore } from "@/stores/auth-store";
 import { Badge } from "@/components/ui/badge";
@@ -78,7 +79,9 @@ export function RequestDetail({
   // the component reads the fresh value rather than the stale prop.
   const req = data;
   const status = req.status;
+  const kind = requestKindFromInfo(req.info);
   const parked =
+    kind === "downloadAndFix" &&
     !parkedWorkers.isError &&
     isRequestParked(req, parkedWorkers.data);
 
@@ -98,6 +101,7 @@ export function RequestDetail({
       <div className="flex items-center gap-2">
         <span className="text-muted-foreground">Status</span>
         <StatusBadge status={status.Type} />
+        <Badge variant="secondary">{requestKindLabel(kind)}</Badge>
         {parked && <Badge variant="warning">Parked</Badge>}
       </div>
       {parked && (

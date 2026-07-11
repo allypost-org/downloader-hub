@@ -116,7 +116,19 @@ fn api_router() -> Router<AppState> {
         .route("/accounts/users", get(routes::list_account_users))
         .route("/accounts/places", get(routes::list_account_places))
         .route("/accounts/users/{id}", patch(routes::update_account_user))
+        .route(
+            "/accounts/users/{id}/refresh",
+            post(routes::refresh_account_user),
+        )
         .route("/accounts/places/{id}", patch(routes::update_account_place))
+        .route(
+            "/accounts/places/{id}/refresh",
+            post(routes::refresh_account_place),
+        )
+        .route(
+            "/accounts/refresh-stale",
+            post(routes::refresh_stale_accounts),
+        )
         .route(
             "/requests/backfill-ordered-refs",
             post(routes::backfill_ordered_refs),

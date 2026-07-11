@@ -1,10 +1,12 @@
 pub mod ack_delivery_result;
 pub mod add_errors_result;
+pub mod complete_account_refresh_result;
 pub mod create_result;
 pub mod fail_delivery_result;
 pub mod fail_result;
 pub mod finish_delivery_result;
 pub mod finish_result;
+pub mod get_account_refresh_item_result;
 pub mod get_work_item_result;
 pub mod move_to_waiting_for_requester_result;
 pub mod release_delivery_result;

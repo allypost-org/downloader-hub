@@ -312,6 +312,19 @@ export const api = {
       "/requests/backfill-ordered-refs",
     ),
 
+  refreshAccountUser: (id: string) =>
+    request<{ requestId: string }>(
+      "POST",
+      `/accounts/users/${encodeURIComponent(id)}/refresh`,
+    ),
+  refreshAccountPlace: (id: string) =>
+    request<{ requestId: string }>(
+      "POST",
+      `/accounts/places/${encodeURIComponent(id)}/refresh`,
+    ),
+  refreshStaleAccounts: () =>
+    request<{ enqueued: number }>("POST", "/accounts/refresh-stale"),
+
   listRestrictions: (type: "ban" | "limit") =>
     request<RestrictionInfo[]>("GET", `/restrictions?type=${type}`),
   createRestriction: (body: CreateRestrictionBody) =>

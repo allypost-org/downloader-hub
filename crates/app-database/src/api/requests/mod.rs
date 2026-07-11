@@ -6,7 +6,7 @@ use crate::{
     Database, DatabaseError, DatabaseRequest,
     api::accounts::{place_ref_value, user_ref_value},
     entity::{
-        accounts::{AccountPlaceRef, AccountUserRef},
+        accounts::{AccountPlaceRef, AccountUserRef, Platform},
         requests::{file_reference::FileReference, request_info::RequestInfo},
     },
     error::ResponseError,
@@ -30,7 +30,38 @@ impl Database {
     where
         T: Into<RequestInfo>,
     {
+        self.requests_add_with_work_kind(
+            requester_id,
+            info,
+            metadata,
+            idempotency_key,
+            ordered_by,
+            ordered_in,
+            None,
+        )
+        .await
+    }
+
+    pub async fn requests_add_with_work_kind<T>(
+        &self,
+        requester_id: Arc<str>,
+        info: T,
+        metadata: HashMap<String, String>,
+        idempotency_key: Option<String>,
+        ordered_by: Option<AccountUserRef>,
+        ordered_in: Option<AccountPlaceRef>,
+        work_kind: Option<crate::entity::requests::request_info::WorkKind>,
+    ) -> Result<RequestIdResponse, DatabaseError>
+    where
+        T: Into<RequestInfo>,
+    {
         let info = info.into();
+        let work_kind = work_kind.or_else(|| match info.work_kind() {
+            crate::entity::requests::request_info::WorkKind::AccountRefresh => {
+                Some(crate::entity::requests::request_info::WorkKind::AccountRefresh)
+            }
+            crate::entity::requests::request_info::WorkKind::Download => None,
+        });
 
         let mut req = DatabaseRequest::named("requests:add")
             .with_arg(
@@ -43,6 +74,9 @@ impl Database {
                 convex::Value::Object(metadata.into_iter().map(|(k, v)| (k, v.into())).collect()),
             )
             .with_arg("idempotencyKey", idempotency_key);
+        if let Some(work_kind) = work_kind {
+            req = req.with_arg("workKind", work_kind.as_str());
+        }
         if let Some(ordered_by) = ordered_by {
             req = req.with_arg("orderedBy", user_ref_value(&ordered_by));
         }
@@ -162,6 +196,16 @@ impl Database {
         &self,
     ) -> Result<Arc<[RequestInfoResponse]>, DatabaseError> {
         DatabaseRequest::named("requests:getAllAvailable")
+            .query(self)
+            .await
+    }
+
+    pub async fn requests_get_available_account_refresh(
+        &self,
+        platform: Platform,
+    ) -> Result<Arc<[RequestInfoResponse]>, DatabaseError> {
+        DatabaseRequest::named("requests:getAvailableAccountRefresh")
+            .with_arg("platform", platform.as_str())
             .query(self)
             .await
     }
@@ -465,6 +509,29 @@ impl Database {
         DatabaseRequest::named("requests:finish")
             .with_arg("requestId", request_id.as_ref())
             .with_arg("requesterId", requester_id.as_ref())
+            .mutate(self)
+            .await
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "code")]
+pub enum CompleteAccountRefreshResult {
+    RequestNotFound,
+    RequestNotInProgress,
+    RequestNotTakenByYou,
+    WrongWorkKind,
+    Ok,
+}
+impl Database {
+    pub async fn requests_complete_account_refresh(
+        &self,
+        request_id: Arc<str>,
+        taker_id: Arc<str>,
+    ) -> Result<CompleteAccountRefreshResult, DatabaseError> {
+        DatabaseRequest::named("requests:completeAccountRefresh")
+            .with_arg("requestId", request_id.as_ref())
+            .with_arg("takerId", taker_id.as_ref())
             .mutate(self)
             .await
     }

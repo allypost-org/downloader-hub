@@ -30,6 +30,14 @@ pub async fn process_work_request(work_request: WorkRequest) {
         WorkRequestInfo::DownloadAndFix(file_reference) => {
             process_download_and_fix(meta, file_reference).await;
         }
+        WorkRequestInfo::RefreshAccountInfo(_) => {
+            warn!(id = %meta.request_id, "worker received account refresh item; refusing");
+            if let Err(e) =
+                crate::cmd::work::rpc::RpcClient::refuse_work_item(meta.request_id).await
+            {
+                error!(?e, "refuse_work_item failed");
+            }
+        }
     }
 }
 

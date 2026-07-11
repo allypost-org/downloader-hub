@@ -17,6 +17,18 @@ impl Platform {
     }
 }
 
+impl std::str::FromStr for Platform {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "telegram" => Ok(Self::Telegram),
+            "discord" => Ok(Self::Discord),
+            other => Err(format!("unknown platform: {other}")),
+        }
+    }
+}
+
 impl std::fmt::Display for Platform {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())

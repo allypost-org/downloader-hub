@@ -3,7 +3,9 @@ import { type ColumnDef } from "@tanstack/react-table";
 import type { UseMutationResult } from "@tanstack/react-query";
 import type { RequestInfoResponse } from "@/lib/api";
 import type { useAccountNames } from "@/lib/useAccountNames";
+import { requestKindFromInfo, requestKindLabel } from "@/lib/requestKind";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/StatusBadge";
 
 function toNumber(v: string | number): number {
@@ -47,6 +49,16 @@ export function useRequestColumns({
           <span className="font-mono text-xs">
             {row.original.requestId.slice(-8)}
           </span>
+        ),
+      },
+      {
+        id: "kind",
+        header: "Type",
+        accessorFn: (r) => requestKindLabel(requestKindFromInfo(r.info)),
+        cell: ({ row }) => (
+          <Badge variant="secondary" className="text-xs">
+            {requestKindLabel(requestKindFromInfo(row.original.info))}
+          </Badge>
         ),
       },
       {

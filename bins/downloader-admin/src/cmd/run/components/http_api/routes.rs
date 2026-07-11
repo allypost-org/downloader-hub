@@ -1,15 +1,19 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use app_database::{
     Database,
     api::{
-        accounts::OptionalField,
+        accounts::{AccountPlaceInfo, AccountUserInfo, OptionalField},
         authed::{AuthedFullInfo, AuthedRemoveResult, AuthedRevokeResult, AuthedRotateTokenResult},
         requests::{
             CancelResult, RemoveResult, RequestStatusType, RequestsByStatusPage, RetryResult,
         },
     },
-    entity::authed::AuthedForRole,
+    entity::{
+        accounts::{AccountPlaceRef, AccountUserRef, Platform},
+        authed::AuthedForRole,
+        requests::request_info::{RefreshAccountInfoPayload, RequestInfo, WorkKind},
+    },
 };
 use axum::{
     Json,
@@ -487,6 +491,265 @@ pub async fn update_account_place(
             V1Response::err(StatusCode::INTERNAL_SERVER_ERROR, "database error")
         }
     }
+}
+
+const REFRESH_BATCH_SIZE: usize = 40;
+
+fn refresh_idempotency_key(kind: &str, platform: Platform, platform_id: &str) -> String {
+    let day = jiff::Timestamp::now().strftime("%Y%m%d").to_string();
+    format!("refresh-{kind}-{platform}-{platform_id}-{day}")
+}
+
+async fn enqueue_account_refresh(
+    admin_id: &str,
+    payload: RefreshAccountInfoPayload,
+    idempotency_key: String,
+) -> Result<app_database::api::requests::RequestIdResponse, app_database::DatabaseError> {
+    Database::global()
+        .requests_add_with_work_kind(
+            Arc::from(admin_id),
+            RequestInfo::RefreshAccountInfo(payload),
+            HashMap::new(),
+            Some(idempotency_key),
+            None,
+            None,
+            Some(WorkKind::AccountRefresh),
+        )
+        .await
+}
+
+fn is_stale_user(user: &AccountUserInfo) -> bool {
+    user.username.is_none() && user.display_name.is_none()
+}
+
+fn is_stale_place(place: &AccountPlaceInfo) -> bool {
+    place.name.is_none() && place.username.is_none()
+}
+
+fn batch_refs<T, F>(items: &[T], batch_size: usize, map_ref: F) -> Vec<Vec<T>>
+where
+    T: Clone,
+    F: Fn(&T) -> (Platform, String),
+{
+    let mut by_platform: HashMap<Platform, Vec<T>> = HashMap::new();
+    for item in items {
+        let (platform, _) = map_ref(item);
+        by_platform.entry(platform).or_default().push(item.clone());
+    }
+
+    let mut batches = Vec::new();
+    for (_platform, group) in by_platform {
+        for chunk in group.chunks(batch_size) {
+            batches.push(chunk.to_vec());
+        }
+    }
+    batches
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RefreshEnqueueResponse {
+    pub request_id: Arc<str>,
+}
+
+pub async fn refresh_account_user(
+    session: WriteSession,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let user = match Database::global().accounts_get_user(&id).await {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return V1Response::<RefreshEnqueueResponse>::err(
+                StatusCode::NOT_FOUND,
+                "user not found",
+            );
+        }
+        Err(e) => {
+            tracing::error!(?e, "refresh_account_user lookup failed");
+            return V1Response::<RefreshEnqueueResponse>::err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "database error",
+            );
+        }
+    };
+
+    let payload = RefreshAccountInfoPayload {
+        users: vec![AccountUserRef {
+            platform: user.platform,
+            id: user.platform_id.clone(),
+        }],
+        places: vec![],
+    };
+    let idempotency_key =
+        refresh_idempotency_key("user", user.platform, &user.platform_id);
+
+    match enqueue_account_refresh(session.admin_id(), payload, idempotency_key).await {
+        Ok(res) => V1Response::ok(RefreshEnqueueResponse {
+            request_id: res.id,
+        }),
+        Err(e) => {
+            tracing::error!(?e, "refresh_account_user enqueue failed");
+            V1Response::<RefreshEnqueueResponse>::err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "database error",
+            )
+        }
+    }
+}
+
+pub async fn refresh_account_place(
+    session: WriteSession,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let place = match Database::global().accounts_get_place(&id).await {
+        Ok(Some(place)) => place,
+        Ok(None) => {
+            return V1Response::<RefreshEnqueueResponse>::err(
+                StatusCode::NOT_FOUND,
+                "place not found",
+            );
+        }
+        Err(e) => {
+            tracing::error!(?e, "refresh_account_place lookup failed");
+            return V1Response::<RefreshEnqueueResponse>::err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "database error",
+            );
+        }
+    };
+
+    let payload = RefreshAccountInfoPayload {
+        users: vec![],
+        places: vec![AccountPlaceRef {
+            platform: place.platform,
+            id: place.platform_id.clone(),
+        }],
+    };
+    let idempotency_key =
+        refresh_idempotency_key("place", place.platform, &place.platform_id);
+
+    match enqueue_account_refresh(session.admin_id(), payload, idempotency_key).await {
+        Ok(res) => V1Response::ok(RefreshEnqueueResponse {
+            request_id: res.id,
+        }),
+        Err(e) => {
+            tracing::error!(?e, "refresh_account_place enqueue failed");
+            V1Response::<RefreshEnqueueResponse>::err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "database error",
+            )
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct RefreshStaleResponse {
+    pub enqueued: u64,
+}
+
+pub async fn refresh_stale_accounts(session: WriteSession) -> impl IntoResponse {
+    let (users, places) = match tokio::try_join!(
+        Database::global().accounts_list_users(),
+        Database::global().accounts_list_places(),
+    ) {
+        Ok(pair) => pair,
+        Err(e) => {
+            tracing::error!(?e, "refresh_stale_accounts list failed");
+            return V1Response::<RefreshStaleResponse>::err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "database error",
+            );
+        }
+    };
+
+    let stale_users: Vec<AccountUserInfo> = users
+        .iter()
+        .filter(|u| is_stale_user(u))
+        .cloned()
+        .collect();
+    let stale_places: Vec<AccountPlaceInfo> = places
+        .iter()
+        .filter(|p| is_stale_place(p))
+        .cloned()
+        .collect();
+
+    let user_batches = batch_refs(&stale_users, REFRESH_BATCH_SIZE, |u| {
+        (u.platform, u.platform_id.clone())
+    });
+    let place_batches = batch_refs(&stale_places, REFRESH_BATCH_SIZE, |p| {
+        (p.platform, p.platform_id.clone())
+    });
+
+    let mut enqueued = 0u64;
+    let admin_id = session.admin_id();
+
+    for batch in user_batches {
+        if batch.is_empty() {
+            continue;
+        }
+        let platform = batch[0].platform;
+        let refs: Vec<AccountUserRef> = batch
+            .iter()
+            .map(|u| AccountUserRef {
+                platform: u.platform,
+                id: u.platform_id.clone(),
+            })
+            .collect();
+        let idempotency_key = refresh_idempotency_key(
+            "users-batch",
+            platform,
+            &format!("{}:{}", batch.len(), batch[0].platform_id),
+        );
+        let payload = RefreshAccountInfoPayload {
+            users: refs,
+            places: vec![],
+        };
+        match enqueue_account_refresh(admin_id, payload, idempotency_key).await {
+            Ok(_) => enqueued += 1,
+            Err(e) => {
+                tracing::error!(?e, "refresh_stale_accounts user batch failed");
+                return V1Response::<RefreshStaleResponse>::err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "database error",
+                );
+            }
+        }
+    }
+
+    for batch in place_batches {
+        if batch.is_empty() {
+            continue;
+        }
+        let platform = batch[0].platform;
+        let refs: Vec<AccountPlaceRef> = batch
+            .iter()
+            .map(|p| AccountPlaceRef {
+                platform: p.platform,
+                id: p.platform_id.clone(),
+            })
+            .collect();
+        let idempotency_key = refresh_idempotency_key(
+            "places-batch",
+            platform,
+            &format!("{}:{}", batch.len(), batch[0].platform_id),
+        );
+        let payload = RefreshAccountInfoPayload {
+            users: vec![],
+            places: refs,
+        };
+        match enqueue_account_refresh(admin_id, payload, idempotency_key).await {
+            Ok(_) => enqueued += 1,
+            Err(e) => {
+                tracing::error!(?e, "refresh_stale_accounts place batch failed");
+                return V1Response::<RefreshStaleResponse>::err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "database error",
+                );
+            }
+        }
+    }
+
+    V1Response::ok(RefreshStaleResponse { enqueued })
 }
 
 pub async fn backfill_ordered_refs(_session: WriteSession) -> impl IntoResponse {

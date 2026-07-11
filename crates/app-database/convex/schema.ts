@@ -71,10 +71,16 @@ export const accountPlaceRef = v.object({
   id: v.string(),
 });
 
+export const requestWorkKind = v.union(
+  v.literal("download"),
+  v.literal("accountRefresh"),
+);
+
 export const requestsId = "downloader_hub_requests" as const;
 export const requests = {
   requester: v.id(authedId),
   info: v.string(),
+  workKind: v.optional(requestWorkKind),
   tries: v.int64(),
   // used to deduplicate requests, must be globally unique
   idempotencyKey: v.optional(v.string()),
@@ -163,6 +169,7 @@ export default defineSchema(
 
     [requestsId]: defineTable(requests)
       .index("by_status_type", ["status.Type", "requester"])
+      .index("by_status_work_kind", ["status.Type", "workKind"])
       .index("by_status_creation", ["status.Type"])
       .index("by_idempotency_key", ["idempotencyKey"])
       .index("by_last_modified", ["lastModified"])
