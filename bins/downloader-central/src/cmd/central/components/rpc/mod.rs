@@ -315,7 +315,7 @@ impl CentralRpcServer {
                 }
             }
             Ok(AuthedInfoResponse::NotAuthorized { error }) => {
-                debug!(%error, "irpc auth rejected");
+                warn!(%error, "irpc auth rejected");
                 metrics::auth_unauthorized();
                 AuthOutcome {
                     result: AuthResult::Unauthorized,

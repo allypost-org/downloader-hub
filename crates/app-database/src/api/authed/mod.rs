@@ -32,11 +32,21 @@ pub struct AuthedInfo {
     )]
     pub expires_at: Option<u64>,
 }
+fn normalize_api_token(token: Arc<str>) -> Arc<str> {
+    let trimmed = token.trim();
+    if trimmed.is_empty() || trimmed.len() == token.len() {
+        token
+    } else {
+        Arc::from(trimmed)
+    }
+}
+
 impl Database {
     pub async fn authed_get_info_by_token(
         &self,
         token: Arc<str>,
     ) -> Result<AuthedInfoResponse, DatabaseError> {
+        let token = normalize_api_token(token);
         DatabaseRequest::named("authed:getInfoByToken")
             .with_arg("token", token.as_ref())
             .query(self)
