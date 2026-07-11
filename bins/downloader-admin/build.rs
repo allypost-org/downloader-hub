@@ -1,4 +1,5 @@
 use std::{
+    env,
     path::{Path, PathBuf},
     process::Command,
     time::SystemTime,
@@ -8,20 +9,21 @@ const FRONTEND_DIR: &str = "frontend";
 const DIST_INDEX: &str = "frontend/dist/index.html";
 
 fn main() {
-    let frontend_dir = Path::new(FRONTEND_DIR);
-    let dist_index = Path::new(DIST_INDEX);
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let frontend_dir = manifest_dir.join(FRONTEND_DIR);
+    let dist_index = manifest_dir.join(DIST_INDEX);
 
-    for watched in watched_files(frontend_dir) {
+    for watched in watched_files(&frontend_dir) {
         println!("cargo:rerun-if-changed={}", watched.display());
     }
     println!("cargo:rerun-if-changed=build.rs");
 
-    if std::env::var_os("SKIP_FRONTEND_BUILD").is_some() {
+    if env::var_os("SKIP_FRONTEND_BUILD").is_some() {
         println!("cargo:warning=[admin-frontend] SKIP_FRONTEND_BUILD set; skipping SPA build");
         return;
     }
 
-    if !is_stale(frontend_dir, dist_index) {
+    if !is_stale(&frontend_dir, &dist_index) {
         return;
     }
 
@@ -42,7 +44,7 @@ fn main() {
         }
     };
 
-    if !ensure_node_modules(frontend_dir, &bun) {
+    if !ensure_node_modules(&frontend_dir, &bun) {
         println!(
             "cargo:warning=[admin-frontend] `bun install` failed; SPA not rebuilt. Run `bun \
              install` in bins/downloader-admin/frontend manually."
@@ -53,7 +55,7 @@ fn main() {
     let status = Command::new(&bun)
         .arg("run")
         .arg("build")
-        .current_dir(frontend_dir)
+        .current_dir(&frontend_dir)
         .status();
 
     match status {
@@ -118,7 +120,7 @@ fn file_mtime(path: &Path) -> Option<SystemTime> {
 }
 
 fn which_bun() -> Option<PathBuf> {
-    if let Some(b) = std::env::var_os("BUN") {
+    if let Some(b) = env::var_os("BUN") {
         let p = PathBuf::from(b);
         if p.is_file() {
             return Some(p);

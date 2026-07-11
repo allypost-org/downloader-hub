@@ -607,6 +607,30 @@ impl Database {
         let req = status_by_status_request(status_type, limit, cursor);
         req.query(self).await
     }
+
+    pub async fn requests_get_by_ordered_by(
+        &self,
+        platform: crate::entity::accounts::Platform,
+        id: &str,
+        status_type: Option<RequestStatusType>,
+        limit: Option<i64>,
+        cursor: Option<Arc<str>>,
+    ) -> Result<RequestsByStatusPage, DatabaseError> {
+        let req = by_ordered_by_request(platform, id, status_type, limit, cursor);
+        req.query(self).await
+    }
+
+    pub async fn requests_get_by_ordered_in(
+        &self,
+        platform: crate::entity::accounts::Platform,
+        id: &str,
+        status_type: Option<RequestStatusType>,
+        limit: Option<i64>,
+        cursor: Option<Arc<str>>,
+    ) -> Result<RequestsByStatusPage, DatabaseError> {
+        let req = by_ordered_in_request(platform, id, status_type, limit, cursor);
+        req.query(self).await
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -654,6 +678,54 @@ fn status_by_status_request(
 ) -> DatabaseRequest {
     let mut req =
         DatabaseRequest::named("requests:getByStatus").with_arg("statusType", status_type.as_str());
+    if let Some(limit) = limit
+        && limit > 0
+    {
+        req = req.with_arg("limit", limit);
+    }
+    if let Some(cursor) = cursor {
+        req = req.with_arg("cursor", cursor.as_ref());
+    }
+    req
+}
+
+fn by_ordered_by_request(
+    platform: crate::entity::accounts::Platform,
+    id: &str,
+    status_type: Option<RequestStatusType>,
+    limit: Option<i64>,
+    cursor: Option<Arc<str>>,
+) -> DatabaseRequest {
+    let mut req = DatabaseRequest::named("requests:getByOrderedBy")
+        .with_arg("platform", platform.as_str())
+        .with_arg("id", id);
+    if let Some(status_type) = status_type {
+        req = req.with_arg("statusType", status_type.as_str());
+    }
+    if let Some(limit) = limit
+        && limit > 0
+    {
+        req = req.with_arg("limit", limit);
+    }
+    if let Some(cursor) = cursor {
+        req = req.with_arg("cursor", cursor.as_ref());
+    }
+    req
+}
+
+fn by_ordered_in_request(
+    platform: crate::entity::accounts::Platform,
+    id: &str,
+    status_type: Option<RequestStatusType>,
+    limit: Option<i64>,
+    cursor: Option<Arc<str>>,
+) -> DatabaseRequest {
+    let mut req = DatabaseRequest::named("requests:getByOrderedIn")
+        .with_arg("platform", platform.as_str())
+        .with_arg("id", id);
+    if let Some(status_type) = status_type {
+        req = req.with_arg("statusType", status_type.as_str());
+    }
     if let Some(limit) = limit
         && limit > 0
     {

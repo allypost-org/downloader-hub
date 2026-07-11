@@ -1320,21 +1320,36 @@ const requestStatusType = v.union(
   v.literal("failed"),
 );
 
+const requestsByAccountPageReturn = v.object({
+  page: v.array(v.object(requestDataReturn)),
+  isDone: v.boolean(),
+  continueCursor: v.string(),
+});
+
+function mapRequestPage(result: {
+  page: Doc<typeof requestsId>[];
+  isDone: boolean;
+  continueCursor: string;
+}) {
+  return {
+    page: result.page.map(toRequestData),
+    isDone: result.isDone,
+    continueCursor: result.continueCursor,
+  };
+}
+
+function paginateLimit(limit: bigint | undefined): number {
+  return limit !== undefined && limit > 0n ? Number(limit) : 100;
+}
+
 export const getByStatus = query({
   args: {
     statusType: requestStatusType,
     limit: v.optional(v.int64()),
     cursor: v.optional(v.string()),
   },
-  returns: v.object({
-    page: v.array(v.object(requestDataReturn)),
-    isDone: v.boolean(),
-    continueCursor: v.string(),
-  }),
+  returns: requestsByAccountPageReturn,
   handler: async (ctx, args) => {
-    const numItems =
-      args.limit !== undefined && args.limit > 0n ? Number(args.limit) : 100;
-
     const result = await ctx.db
       .query(requestsId)
       .withIndex("by_status_creation", (q) =>
@@ -1342,28 +1357,87 @@ export const getByStatus = query({
       )
       .order("desc")
       .paginate({
-        numItems,
+        numItems: paginateLimit(args.limit),
         cursor: args.cursor ?? null,
       });
 
-    return {
-      page: result.page.map((row) => ({
-        requestId: row._id,
-        requester: row.requester,
-        info: row.info,
-        metadata: row.metadata,
-        status: row.status,
-        errors: row.errors,
-        refusedBy: row.refusedBy ?? [],
-        idempotencyKey: row.idempotencyKey,
-        lastModified: row.lastModified,
-        createdAt: row._creationTime,
-        orderedBy: row.orderedBy,
-        orderedIn: row.orderedIn,
-      })),
-      isDone: result.isDone,
-      continueCursor: result.continueCursor,
-    };
+    return mapRequestPage(result);
+  },
+});
+
+export const getByOrderedBy = query({
+  args: {
+    platform: v.union(v.literal("telegram"), v.literal("discord")),
+    id: v.string(),
+    statusType: v.optional(requestStatusType),
+    limit: v.optional(v.int64()),
+    cursor: v.optional(v.string()),
+  },
+  returns: requestsByAccountPageReturn,
+  handler: async (ctx, args) => {
+    const numItems = paginateLimit(args.limit);
+    const cursor = args.cursor ?? null;
+
+    const result = args.statusType
+      ? await ctx.db
+          .query(requestsId)
+          .withIndex("by_ordered_by_status", (q) =>
+            q
+              .eq("orderedBy.platform", args.platform)
+              .eq("orderedBy.id", args.id)
+              .eq("status.Type", args.statusType!),
+          )
+          .order("desc")
+          .paginate({ numItems, cursor })
+      : await ctx.db
+          .query(requestsId)
+          .withIndex("by_ordered_by", (q) =>
+            q
+              .eq("orderedBy.platform", args.platform)
+              .eq("orderedBy.id", args.id),
+          )
+          .order("desc")
+          .paginate({ numItems, cursor });
+
+    return mapRequestPage(result);
+  },
+});
+
+export const getByOrderedIn = query({
+  args: {
+    platform: v.union(v.literal("telegram"), v.literal("discord")),
+    id: v.string(),
+    statusType: v.optional(requestStatusType),
+    limit: v.optional(v.int64()),
+    cursor: v.optional(v.string()),
+  },
+  returns: requestsByAccountPageReturn,
+  handler: async (ctx, args) => {
+    const numItems = paginateLimit(args.limit);
+    const cursor = args.cursor ?? null;
+
+    const result = args.statusType
+      ? await ctx.db
+          .query(requestsId)
+          .withIndex("by_ordered_in_status", (q) =>
+            q
+              .eq("orderedIn.platform", args.platform)
+              .eq("orderedIn.id", args.id)
+              .eq("status.Type", args.statusType!),
+          )
+          .order("desc")
+          .paginate({ numItems, cursor })
+      : await ctx.db
+          .query(requestsId)
+          .withIndex("by_ordered_in", (q) =>
+            q
+              .eq("orderedIn.platform", args.platform)
+              .eq("orderedIn.id", args.id),
+          )
+          .order("desc")
+          .paginate({ numItems, cursor });
+
+    return mapRequestPage(result);
   },
 });
 

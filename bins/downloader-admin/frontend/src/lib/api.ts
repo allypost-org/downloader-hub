@@ -226,6 +226,34 @@ export const api = {
       `/requests?${params.toString()}`,
     );
   },
+  listRequestsByUser: (
+    platform: AccountPlatform,
+    id: string,
+    opts?: { status?: RequestStatusType; limit?: number; cursor?: string },
+  ) => {
+    const params = new URLSearchParams({ platform, id });
+    if (opts?.status) params.set("status", opts.status);
+    if (opts?.limit) params.set("limit", String(opts.limit));
+    if (opts?.cursor) params.set("cursor", opts.cursor);
+    return request<RequestsByStatusPage>(
+      "GET",
+      `/requests/by-user?${params.toString()}`,
+    );
+  },
+  listRequestsByPlace: (
+    platform: AccountPlatform,
+    id: string,
+    opts?: { status?: RequestStatusType; limit?: number; cursor?: string },
+  ) => {
+    const params = new URLSearchParams({ platform, id });
+    if (opts?.status) params.set("status", opts.status);
+    if (opts?.limit) params.set("limit", String(opts.limit));
+    if (opts?.cursor) params.set("cursor", opts.cursor);
+    return request<RequestsByStatusPage>(
+      "GET",
+      `/requests/by-place?${params.toString()}`,
+    );
+  },
   getRequest: (id: string) =>
     request<RequestInfoResponse>("GET", `/requests/${encodeURIComponent(id)}`),
   retryRequest: (id: string) =>

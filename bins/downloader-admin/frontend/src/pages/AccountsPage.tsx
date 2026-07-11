@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { type ColumnDef } from "@tanstack/react-table";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -19,6 +20,7 @@ import {
   type RuleFormState,
 } from "@/lib/restrictions";
 import { AccountAutocomplete } from "@/components/AccountAutocomplete";
+import { AccountRequestsList } from "@/components/AccountRequestsList";
 import { RestrictionRuleFields } from "@/components/RestrictionRuleFields";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,6 +41,30 @@ import {
 import { DataTable } from "@/components/DataTable";
 
 type Tab = "users" | "places";
+
+type RequestsTarget = {
+  kind: "user" | "place";
+  platform: AccountUserInfo["platform"];
+  platformId: string;
+  label: string;
+};
+
+function userDisplayLabel(u: AccountUserInfo): string {
+  return u.displayName ?? u.username ?? u.platformId;
+}
+
+function placeDisplayLabel(p: AccountPlaceInfo): string {
+  return p.name ?? p.username ?? p.platformId;
+}
+
+function requestsFilterHref(target: RequestsTarget): string {
+  const params = new URLSearchParams({
+    filterKind: target.kind,
+    filterPlatform: target.platform,
+    filterId: target.platformId,
+  });
+  return `/requests?${params.toString()}`;
+}
 
 function formatTime(ms: string | number): string {
   const n = typeof ms === "string" ? Number(ms) : ms;
@@ -534,7 +560,11 @@ export function AccountsPage() {
   const [selectedPlace, setSelectedPlace] = useState<AccountPlaceInfo | null>(
     null,
   );
+  const [requestsTarget, setRequestsTarget] = useState<RequestsTarget | null>(
+    null,
+  );
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const readonly = useAuthStore((s) => s.me?.readonly ?? false);
 
   const users = useQuery({
@@ -604,7 +634,21 @@ export function AccountsPage() {
       header: () => <div className="text-right">Actions</div>,
       enableSorting: false,
       cell: ({ row }) => (
-        <div className="text-right">
+        <div className="flex justify-end gap-1 text-right">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() =>
+              setRequestsTarget({
+                kind: "user",
+                platform: row.original.platform,
+                platformId: row.original.platformId,
+                label: userDisplayLabel(row.original),
+              })
+            }
+          >
+            Requests
+          </Button>
           <Button
             size="sm"
             variant="outline"
@@ -679,7 +723,21 @@ export function AccountsPage() {
       header: () => <div className="text-right">Actions</div>,
       enableSorting: false,
       cell: ({ row }) => (
-        <div className="text-right">
+        <div className="flex justify-end gap-1 text-right">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() =>
+              setRequestsTarget({
+                kind: "place",
+                platform: row.original.platform,
+                platformId: row.original.platformId,
+                label: placeDisplayLabel(row.original),
+              })
+            }
+          >
+            Requests
+          </Button>
           <Button
             size="sm"
             variant="outline"
@@ -817,6 +875,47 @@ export function AccountsPage() {
                   users={users.data}
                   places={places.data}
                 />
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={requestsTarget != null}
+        onOpenChange={(o) => !o && setRequestsTarget(null)}
+      >
+        <DialogContent className="max-h-[85vh] max-w-4xl overflow-y-auto">
+          {requestsTarget && (
+            <>
+              <DialogHeader>
+                <DialogTitle>
+                  {requestsTarget.kind === "user"
+                    ? `Requests by ${requestsTarget.label}`
+                    : `Requests in ${requestsTarget.label}`}
+                </DialogTitle>
+                <DialogDescription>
+                  {requestsTarget.platform}:{requestsTarget.platformId} — all
+                  statuses, newest first. Legacy rows without refs are omitted.
+                </DialogDescription>
+              </DialogHeader>
+              <AccountRequestsList
+                kind={requestsTarget.kind}
+                platform={requestsTarget.platform}
+                accountId={requestsTarget.platformId}
+              />
+              <div className="flex justify-end pt-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    if (!requestsTarget) return;
+                    void navigate({ to: requestsFilterHref(requestsTarget) });
+                    setRequestsTarget(null);
+                  }}
+                >
+                  Open in Requests page
+                </Button>
               </div>
             </>
           )}

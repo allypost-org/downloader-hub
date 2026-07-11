@@ -79,6 +79,69 @@ pub async fn list_requests(
     }
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ListRequestsByAccountQuery {
+    pub platform: app_database::entity::accounts::Platform,
+    pub id: String,
+    pub status: Option<String>,
+    pub limit: Option<i64>,
+    pub cursor: Option<Arc<str>>,
+}
+
+pub async fn list_requests_by_user(
+    _session: AdminSession,
+    Query(q): Query<ListRequestsByAccountQuery>,
+) -> impl IntoResponse {
+    if q.id.is_empty() {
+        return V1Response::<RequestsByStatusPage>::err(StatusCode::BAD_REQUEST, "missing `id`");
+    }
+    let status = q.status.as_deref().and_then(parse_status_type);
+    if q.status.is_some() && status.is_none() {
+        return V1Response::<RequestsByStatusPage>::err(
+            StatusCode::BAD_REQUEST,
+            "invalid `status`",
+        );
+    }
+    let limit = q.limit.map(|n| n.clamp(1, REQUESTS_LIMIT_MAX));
+    match Database::global()
+        .requests_get_by_ordered_by(q.platform, q.id.as_str(), status, limit, q.cursor)
+        .await
+    {
+        Ok(page) => V1Response::ok(page),
+        Err(e) => {
+            tracing::error!(?e, "list_requests_by_user failed");
+            V1Response::err(StatusCode::INTERNAL_SERVER_ERROR, "database error")
+        }
+    }
+}
+
+pub async fn list_requests_by_place(
+    _session: AdminSession,
+    Query(q): Query<ListRequestsByAccountQuery>,
+) -> impl IntoResponse {
+    if q.id.is_empty() {
+        return V1Response::<RequestsByStatusPage>::err(StatusCode::BAD_REQUEST, "missing `id`");
+    }
+    let status = q.status.as_deref().and_then(parse_status_type);
+    if q.status.is_some() && status.is_none() {
+        return V1Response::<RequestsByStatusPage>::err(
+            StatusCode::BAD_REQUEST,
+            "invalid `status`",
+        );
+    }
+    let limit = q.limit.map(|n| n.clamp(1, REQUESTS_LIMIT_MAX));
+    match Database::global()
+        .requests_get_by_ordered_in(q.platform, q.id.as_str(), status, limit, q.cursor)
+        .await
+    {
+        Ok(page) => V1Response::ok(page),
+        Err(e) => {
+            tracing::error!(?e, "list_requests_by_place failed");
+            V1Response::err(StatusCode::INTERNAL_SERVER_ERROR, "database error")
+        }
+    }
+}
+
 pub async fn get_request(_session: AdminSession, Path(id): Path<String>) -> impl IntoResponse {
     match Database::global()
         .requests_get(Arc::from(id.as_str()))

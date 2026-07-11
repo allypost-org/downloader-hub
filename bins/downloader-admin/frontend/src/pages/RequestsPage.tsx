@@ -1,26 +1,30 @@
 import { useMemo, useState } from "react";
-import { type ColumnDef } from "@tanstack/react-table";
-import { useMutation, useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  parseAsString,
-  parseAsStringLiteral,
-  useQueryStates,
-} from "nuqs";
+  useMutation,
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import { parseAsString, parseAsStringLiteral, useQueryStates } from "nuqs";
 import {
   api,
+  type AccountPlatform,
   type RequestInfoResponse,
   type RequestStatusType,
 } from "@/lib/api";
 import { useAuthedNames } from "@/lib/useAuthedNames";
 import { useAccountNames } from "@/lib/useAccountNames";
 import { useAuthStore } from "@/stores/auth-store";
+import { useRequestColumns } from "@/lib/useRequestColumns";
+import { AccountAutocomplete } from "@/components/AccountAutocomplete";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DataTable } from "@/components/DataTable";
-import { StatusBadge } from "@/components/StatusBadge";
 import { RequestDetail } from "@/pages/RequestDetail";
 
 const TABS = ["failed", "pending", "inProgress", "delivering", "done"] as const;
+const PLATFORMS = ["telegram", "discord"] as const;
+const FILTER_KINDS = ["user", "place"] as const;
 
 const PAGE_SIZE = 50;
 
@@ -28,22 +32,76 @@ function toNumber(v: string | number): number {
   return typeof v === "number" ? v : Number(v);
 }
 
-function formatTime(ms: string | number): string {
-  const n = toNumber(ms);
-  if (!Number.isFinite(n) || n <= 0) return "—";
-  return new Date(n).toLocaleString();
+type AccountFilter = {
+  filterKind: (typeof FILTER_KINDS)[number];
+  filterPlatform: AccountPlatform;
+  filterId: string;
+};
+
+function normalizeFilterId(id: string): string {
+  const trimmed = id.trim();
+  if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function parseAccountFilter(params: {
+  filterKind: string | null;
+  filterPlatform: string | null;
+  filterId: string;
+}): AccountFilter | null {
+  const filterId = normalizeFilterId(params.filterId);
+  if (
+    (params.filterKind === "user" || params.filterKind === "place") &&
+    (params.filterPlatform === "telegram" ||
+      params.filterPlatform === "discord") &&
+    filterId.length > 0
+  ) {
+    return {
+      filterKind: params.filterKind,
+      filterPlatform: params.filterPlatform,
+      filterId,
+    };
+  }
+  return null;
 }
 
 export function RequestsPage() {
-  const [{ tab, cursor }, setParams] = useQueryStates({
-    tab: parseAsStringLiteral(TABS).withDefault("failed"),
-    cursor: parseAsString.withDefault(""),
-  });
+  const [{ tab, cursor, filterKind, filterPlatform, filterId }, setParams] =
+    useQueryStates({
+      tab: parseAsStringLiteral(TABS).withDefault("failed"),
+      cursor: parseAsString.withDefault(""),
+      filterKind: parseAsStringLiteral(FILTER_KINDS),
+      filterPlatform: parseAsStringLiteral(PLATFORMS),
+      filterId: parseAsString.withDefault(""),
+    });
   const [selected, setSelected] = useState<RequestInfoResponse | null>(null);
   const qc = useQueryClient();
   const { name: authedName } = useAuthedNames();
   const accounts = useAccountNames();
   const readonly = useAuthStore((s) => s.me?.readonly ?? false);
+
+  const filter = parseAccountFilter({
+    filterKind,
+    filterPlatform,
+    filterId,
+  });
+
+  const normalizedFilterId = normalizeFilterId(filterId);
+
+  const accountUsers = useQuery({
+    queryKey: ["accounts", "users"],
+    queryFn: () => api.listAccountUsers(),
+    enabled: filterKind === "user" || filterKind === "place",
+    staleTime: 30_000,
+  });
+  const accountPlaces = useQuery({
+    queryKey: ["accounts", "places"],
+    queryFn: () => api.listAccountPlaces(),
+    enabled: filterKind === "user" || filterKind === "place",
+    staleTime: 30_000,
+  });
 
   const counts = useQuery({
     queryKey: ["request-counts"],
@@ -52,9 +110,31 @@ export function RequestsPage() {
   });
 
   const list = useInfiniteQuery({
-    queryKey: ["requests", tab],
-    queryFn: ({ pageParam }) =>
-      api.listRequests(tab, { limit: PAGE_SIZE, cursor: pageParam || undefined }),
+    queryKey: filter
+      ? [
+          "requests",
+          "by-account",
+          filter.filterKind,
+          filter.filterPlatform,
+          filter.filterId,
+          tab,
+        ]
+      : ["requests", tab],
+    queryFn: ({ pageParam }) => {
+      const opts = { limit: PAGE_SIZE, cursor: pageParam || undefined };
+      if (filter) {
+        return filter.filterKind === "user"
+          ? api.listRequestsByUser(filter.filterPlatform, filter.filterId, {
+              ...opts,
+              status: tab,
+            })
+          : api.listRequestsByPlace(filter.filterPlatform, filter.filterId, {
+              ...opts,
+              status: tab,
+            });
+      }
+      return api.listRequests(tab, opts);
+    },
     initialPageParam: cursor || "",
     getNextPageParam: (last) => (last.isDone ? undefined : last.continueCursor),
     staleTime: 5_000,
@@ -74,24 +154,37 @@ export function RequestsPage() {
     void list.fetchNextPage();
   }
 
+  function clearFilter() {
+    void setParams({
+      filterKind: null,
+      filterPlatform: null,
+      filterId: "",
+      cursor: "",
+    });
+  }
+
+  function invalidateRequests() {
+    void qc.invalidateQueries({ queryKey: ["requests"] });
+  }
+
   const retry = useMutation({
     mutationFn: (id: string) => api.retryRequest(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["requests"] }),
+    onSuccess: invalidateRequests,
   });
   const cancel = useMutation({
     mutationFn: (id: string) => api.cancelRequest(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["requests"] }),
+    onSuccess: invalidateRequests,
   });
   const remove = useMutation({
     mutationFn: (id: string) => api.removeRequest(id),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["requests"] });
+      invalidateRequests();
       setSelected(null);
     },
   });
   const clearRefusals = useMutation({
     mutationFn: (id: string) => api.clearRefusals(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["requests"] }),
+    onSuccess: invalidateRequests,
   });
 
   function confirmAction(action: string, fn: () => void) {
@@ -104,121 +197,104 @@ export function RequestsPage() {
     return n ? `${n} (${id.slice(-6)})` : id.slice(-12);
   }
 
-  const columns = useMemo<ColumnDef<RequestInfoResponse>[]>(
-    () => [
-      {
-        accessorFn: (r) => r.requestId.slice(-8),
-        id: "id",
-        header: "ID",
-        cell: ({ row }) => (
-          <span className="font-mono text-xs">
-            {row.original.requestId.slice(-8)}
-          </span>
-        ),
-      },
-      {
-        accessorKey: "requester",
-        header: "From",
-        cell: ({ row }) => (
-          <span className="text-xs">
-            {row.original.requesterName ?? authedLabel(row.original.requester)}
-          </span>
-        ),
-      },
-      {
-        id: "orderedBy",
-        header: "Ordered by",
-        accessorFn: (r) =>
-          r.orderedBy ? accounts.userLabelWithFallback(r.orderedBy) : "",
-        cell: ({ row }) => {
-          const r = row.original;
-          return (
-            <div className="flex flex-col text-xs">
-              <span>
-                {r.orderedBy
-                  ? accounts.userLabelWithFallback(r.orderedBy)
-                  : "—"}
-              </span>
-              {r.orderedIn && (
-                <span className="text-muted-foreground">
-                  in {accounts.placeLabelWithFallback(r.orderedIn)}
-                </span>
-              )}
-            </div>
-          );
-        },
-      },
-      {
-        accessorKey: "status.Type",
-        header: "Status",
-        enableSorting: false,
-        cell: ({ row }) => <StatusBadge status={row.original.status.Type} />,
-      },
-      {
-        accessorKey: "lastModified",
-        header: "Modified",
-        cell: ({ row }) => (
-          <span className="text-xs text-muted-foreground">
-            {formatTime(row.original.lastModified)}
-          </span>
-        ),
-      },
-      {
-        id: "actions",
-        header: () => <div className="text-right">Actions</div>,
-        enableSorting: false,
-        cell: ({ row }) => {
-          const r = row.original;
-          return (
-            <div
-              className="flex justify-end gap-1 text-right"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {(r.status.Type === "failed" || r.status.Type === "done") && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={readonly || retry.isPending}
-                  onClick={() => retry.mutate(r.requestId)}
-                >
-                  Retry
-                </Button>
-              )}
-              {(r.status.Type === "pending" ||
-                r.status.Type === "inProgress" ||
-                r.status.Type === "delivering") && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={readonly || cancel.isPending}
-                  onClick={() => cancel.mutate(r.requestId)}
-                >
-                  Cancel
-                </Button>
-              )}
-              <Button
-                size="sm"
-                variant="destructive"
-                disabled={readonly || remove.isPending}
-                onClick={() =>
-                  confirmAction("Delete request", () =>
-                    remove.mutate(r.requestId),
-                  )
-                }
-              >
-                Delete
-              </Button>
-            </div>
-          );
-        },
-      },
-    ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [accounts, authedName, readonly, retry, cancel, remove],
-  );
+  const filterLabel = useMemo(() => {
+    if (!filter) return null;
+    if (filter.filterKind === "user") {
+      return accounts.userLabelWithFallback({
+        platform: filter.filterPlatform,
+        id: filter.filterId,
+      });
+    }
+    return accounts.placeLabelWithFallback({
+      platform: filter.filterPlatform,
+      id: filter.filterId,
+    });
+  }, [filter, accounts]);
+
+  const columns = useRequestColumns({
+    accounts,
+    authedLabel,
+    readonly,
+    retry,
+    cancel,
+    remove,
+    confirmAction,
+  });
+
+  const platform = filterPlatform ?? "telegram";
 
   return (
     <div className="space-y-4">
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">Account filter</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-end gap-3">
+          <label className="flex flex-col gap-1 text-xs">
+            <span className="text-muted-foreground">Platform</span>
+            <select
+              className="h-9 rounded-md border bg-background px-2 text-sm"
+              value={platform}
+              onChange={(e) =>
+                void setParams({
+                  filterPlatform: e.target.value as AccountPlatform,
+                  filterId: "",
+                  cursor: "",
+                })
+              }
+            >
+              {PLATFORMS.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="flex gap-1">
+            {FILTER_KINDS.map((kind) => (
+              <Button
+                key={kind}
+                size="sm"
+                variant={filterKind === kind ? "default" : "outline"}
+                onClick={() =>
+                  void setParams({ filterKind: kind, filterId: "", cursor: "" })
+                }
+              >
+                {kind === "user" ? "User" : "Place"}
+              </Button>
+            ))}
+          </div>
+          {filterKind && (
+            <label className="min-w-[220px] flex-1 flex flex-col gap-1 text-xs">
+              <span className="text-muted-foreground">
+                {filterKind === "user" ? "User" : "Place"} ID
+              </span>
+              <AccountAutocomplete
+                platform={platform}
+                kind={filterKind}
+                users={accountUsers.data}
+                places={accountPlaces.data}
+                value={normalizedFilterId}
+                onChange={(id) => void setParams({ filterId: id, cursor: "" })}
+              />
+            </label>
+          )}
+          {filter && (
+            <Button size="sm" variant="ghost" onClick={clearFilter}>
+              Clear filter
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+
+      {filter && filterLabel && (
+        <p className="text-sm text-muted-foreground">
+          Showing <span className="capitalize">{tab}</span> requests for{" "}
+          <span className="font-medium text-foreground">{filterLabel}</span> (
+          {filter.filterPlatform}:{filter.filterId})
+        </p>
+      )}
+
       <div className="flex gap-1">
         {TABS.map((t) => (
           <Button
@@ -247,7 +323,11 @@ export function RequestsPage() {
                   columns={columns}
                   data={rows}
                   onRowClick={(r) => setSelected(r)}
-                  emptyMessage={`No ${tab} requests.`}
+                  emptyMessage={
+                    filter
+                      ? `No ${tab} requests for this ${filter.filterKind}.`
+                      : `No ${tab} requests.`
+                  }
                 />
                 <div className="mt-3 flex justify-center">
                   {list.isFetchingNextPage ? (

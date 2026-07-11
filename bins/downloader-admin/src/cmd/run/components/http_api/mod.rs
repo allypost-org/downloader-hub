@@ -86,6 +86,8 @@ fn api_router() -> Router<AppState> {
         .route("/auth/me", get(routes::me))
         .route("/stream", get(stream::ws_stream))
         .route("/requests", get(routes::list_requests))
+        .route("/requests/by-user", get(routes::list_requests_by_user))
+        .route("/requests/by-place", get(routes::list_requests_by_place))
         .route("/requests/counts", get(routes::list_counts))
         .route(
             "/requests/{id}",

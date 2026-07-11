@@ -165,7 +165,19 @@ export default defineSchema(
       .index("by_status_type", ["status.Type", "requester"])
       .index("by_status_creation", ["status.Type"])
       .index("by_idempotency_key", ["idempotencyKey"])
-      .index("by_last_modified", ["lastModified"]),
+      .index("by_last_modified", ["lastModified"])
+      .index("by_ordered_by", ["orderedBy.platform", "orderedBy.id"])
+      .index("by_ordered_by_status", [
+        "orderedBy.platform",
+        "orderedBy.id",
+        "status.Type",
+      ])
+      .index("by_ordered_in", ["orderedIn.platform", "orderedIn.id"])
+      .index("by_ordered_in_status", [
+        "orderedIn.platform",
+        "orderedIn.id",
+        "status.Type",
+      ]),
 
     [outboxId]: defineTable(outbox).index("by_sentBy", ["sentBy"]),
 
