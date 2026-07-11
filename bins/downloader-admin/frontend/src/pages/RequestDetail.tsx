@@ -9,6 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/StatusBadge";
+import { cn } from "@/lib/utils";
+import { ClassValue } from "clsx";
 
 interface Props {
   request: RequestInfoResponse | null;
@@ -19,6 +21,7 @@ interface Props {
   onClearRefusals: (id: string) => void;
   onDelete: (id: string) => void;
   embedded?: boolean;
+  className?: ClassValue | ClassValue[];
 }
 
 function formatTime(ms: string | number): string {
@@ -36,9 +39,11 @@ export function RequestDetail({
   onClearRefusals,
   onDelete,
   embedded = false,
+  className,
 }: Props) {
   const readonly = useAuthStore((s) => s.me?.readonly ?? false);
   const accounts = useAccountNames();
+  const classNames = Array.isArray(className) ? className : [className];
 
   // Refetch the request by id while the detail is open, so status transitions
   // (pending → inProgress → done) appear without re-clicking. The prop is the
@@ -61,13 +66,13 @@ export function RequestDetail({
   if (!data) {
     if (embedded) {
       return (
-        <p className="text-sm text-muted-foreground">
+        <p className={cn("text-sm text-muted-foreground", ...classNames)}>
           Select a request to see its details.
         </p>
       );
     }
     return (
-      <Card>
+      <Card className={cn(...classNames)}>
         <CardContent className="p-6 text-sm text-muted-foreground">
           Select a request to see its details.
         </CardContent>
@@ -93,7 +98,7 @@ export function RequestDetail({
   }
 
   const body = (
-    <div className="space-y-4 text-sm">
+    <div className={cn("space-y-4 text-sm", ...(embedded ? classNames : []))}>
       <div>
         <div className="mb-1 text-muted-foreground">ID</div>
         <code className="break-all text-xs">{req.requestId}</code>
@@ -224,7 +229,7 @@ export function RequestDetail({
   }
 
   return (
-    <Card>
+    <Card className={cn(...classNames)}>
       <CardHeader>
         <CardTitle className="flex items-center justify-between text-sm">
           <span>Request detail</span>

@@ -349,17 +349,20 @@ export function RequestsPage() {
           </CardContent>
         </Card>
 
-        <RequestDetail
-          request={selected}
-          onClose={() => setSelected(null)}
-          authedLabel={authedLabel}
-          onRetry={(id) => retry.mutate(id)}
-          onCancel={(id) => cancel.mutate(id)}
-          onClearRefusals={(id) => clearRefusals.mutate(id)}
-          onDelete={(id) =>
-            confirmAction("Delete request", () => remove.mutate(id))
-          }
-        />
+        <div>
+          <RequestDetail
+            className="sticky top-4"
+            request={selected}
+            onClose={() => setSelected(null)}
+            authedLabel={authedLabel}
+            onRetry={(id) => retry.mutate(id)}
+            onCancel={(id) => cancel.mutate(id)}
+            onClearRefusals={(id) => clearRefusals.mutate(id)}
+            onDelete={(id) =>
+              confirmAction("Delete request", () => remove.mutate(id))
+            }
+          />
+        </div>
       </div>
     </div>
   );
