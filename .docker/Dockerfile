@@ -80,8 +80,10 @@ COPY --from=planner /chef/recipe.json recipe.json
 # dependencies into that directory so they persist in the layer and are
 # inherited by the `builder` stage. A cache mount would shadow those files
 # and defeat cargo-chef's cross-stage reuse.
-RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
-  cargo chef cook \
+# The cargo registry is likewise NOT cache-mounted: baking the crate sources
+# into this layer lets the concurrent `builder` stages inherit them via
+# copy-on-write, so they never race on each other's `.cargo-ok` files.
+RUN cargo chef cook \
   --release \
   --target "${RUST_TARGET}" \
   --recipe-path recipe.json
@@ -110,6 +112,12 @@ RUN cd "$(mktemp --directory)" \
   && rm -rf "$(pwd)" \
   && echo "Installed upx ${UPX_VERSION}"
 COPY . .
+# Remove the source's rust-toolchain.toml so the build uses the toolchain
+# pinned by this image (RUST_VERSION ARG), matching what `deps` cooked with.
+# The source file says `channel = "stable"`, which makes rustup override
+# to a newer stable (e.g. 1.97) mid-build — changing the rustc hash and
+# invalidating every fingerprint (full ~570-crate recompile).
+RUN rm -f rust-toolchain.toml
 # Build the embedded SPA before compiling the Rust binary. rust-embed bakes
 # `frontend/dist` into the binary at compile time, so this must run first.
 # Only the admin binary ships a frontend; for the others this is a no-op.
@@ -125,15 +133,11 @@ RUN if [ "${BINARY_NAME}" = "downloader-admin" ]; then \
     fi
 # Build and compress in a single RUN: the binary lives only in this step's
 # view of /app/target, and upx must read it before it goes to the output path.
-# (No /app/target cache mount: it would shadow the cooked deps from `deps`.)
-#
-# The registry mount uses `sharing=shared` (not `locked`) deliberately: bake
-# builds the bot/central/worker `builder` stages concurrently, and `locked`
-# forces them to queue on this mount, serializing the 3 binary builds. `shared`
-# is safe here because `cargo build` only *reads* the registry (deps are already
-# cooked into the layer by `deps`), and the mount is ephemeral per runner anyway.
-RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=shared \
-  SKIP_FRONTEND_BUILD=1 \
+# No cache mounts here (neither /app/target nor /usr/local/cargo/registry):
+# both are baked into the inherited `deps` layer, and mounting either would
+# shadow those files. The concurrent `builder` stages then read the registry
+# via copy-on-write, with no shared mutable state to race on.
+RUN SKIP_FRONTEND_BUILD=1 \
   cargo build \
   --release \
   --target "${RUST_TARGET}" \
