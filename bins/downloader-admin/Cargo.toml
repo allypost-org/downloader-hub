@@ -1,9 +1,8 @@
 [package]
 name = "downloader-admin"
 version.workspace = true
-authors.workspace = true
-description.workspace = true
 edition.workspace = true
+description.workspace = true
 license.workspace = true
 
 [dependencies]
@@ -15,7 +14,7 @@ app-peer-comms.workspace = true
 app-requests.workspace = true
 arc-swap.workspace = true
 axum = { version = "0.8.6", features = ["macros", "ws"] }
-axum-extra = { version = "0.12.6", features = ["cookie-signed", "cookie-key-expansion"] }
+axum-extra = { version = "0.12.6", features = ["cookie-key-expansion", "cookie-signed"] }
 base64 = "0.22"
 clap.workspace = true
 const_format = "0.2.35"

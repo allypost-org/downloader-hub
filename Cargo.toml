@@ -1,66 +1,65 @@
 [workspace]
-members = ["crates/*", "bins/*"]
 resolver = "2"
+members = ["bins/*", "crates/*"]
 
 [workspace.package]
 version = "0.11.2"
-authors = ["Allypost"]
-description = "A meme downloader"
 edition = "2024"
+description = "A meme downloader"
 license = "MPL-2.0"
 
 [workspace.dependencies]
-app-actions = { version = "*", path = "crates/app-actions" }
-app-config = { version = "*", path = "crates/app-config" }
-app-database = { version = "*", path = "crates/app-database" }
-app-helpers = { version = "*", path = "crates/app-helpers" }
-app-logger = { version = "*", path = "crates/app-logger" }
-app-macros = { version = "*", path = "crates/app-macros" }
-app-peer-comms = { version = "*", path = "crates/app-peer-comms" }
-app-requests = { version = "*", path = "crates/app-requests" }
-app-tasks = { version = "*", path = "crates/app-tasks" }
 anyhow = "1.0.102"
+app-actions = { path = "crates/app-actions", version = "*" }
+app-config = { path = "crates/app-config", version = "*" }
+app-database = { path = "crates/app-database", version = "*" }
+app-helpers = { path = "crates/app-helpers", version = "*" }
+app-logger = { path = "crates/app-logger", version = "*" }
+app-macros = { path = "crates/app-macros", version = "*" }
+app-peer-comms = { path = "crates/app-peer-comms", version = "*" }
+app-requests = { path = "crates/app-requests", version = "*" }
+app-tasks = { path = "crates/app-tasks", version = "*" }
 arc-swap = "1.9"
 async-trait = "0.1.89"
 clap = { version = "4.6.1", features = ["derive", "env"] }
 derive_more = { version = "2.1.1", features = ["debug"] }
 futures = { version = "0.3.32", features = ["thread-pool"] }
 jiff = { version = "0.2", features = ["serde"] }
-serde = { version = "1.0", features = ["derive", "alloc", "rc"] }
+serde = { version = "1.0", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0" }
 size = { version = "0.5.0", features = ["serde"] }
 thiserror = "2.0"
 tikv-jemallocator = "0.7"
-tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "fs", "process", "io-uring", "sync", "time"] }
+tokio = { version = "1.52.3", features = ["fs", "io-uring", "macros", "process", "rt-multi-thread", "sync", "time"] }
 tracing = { version = "0.1.44" }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json", "parking_lot"] }
 url = { version = "2.5.8", features = ["serde"] }
 validator = "0.20.0"
 
 [workspace.lints.clippy]
-nursery = { level = "warn", priority = -1 }
-pedantic = { level = "warn", priority = -1 }
-unwrap_used = "warn"
+cognitive_complexity = "allow"
+manual_let_else = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
 # expect_used = "warn"
 module_name_repetitions = "allow"
-single_match_else = "allow"
-manual_let_else = "allow"
-uninlined_format_args = "allow"
-missing_panics_doc = "allow"
-missing_errors_doc = "allow"
-no_effect_underscore_binding = "allow"
-cognitive_complexity = "allow"
-unnecessary_debug_formatting = "allow"
-redundant_type_annotations = "warn"
 needless_collect = "warn"
+no_effect_underscore_binding = "allow"
+nursery = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+redundant_type_annotations = "warn"
+single_match_else = "allow"
+uninlined_format_args = "allow"
+unnecessary_debug_formatting = "allow"
+unwrap_used = "warn"
 
 [profile.release]
 strip = true
 # opt-level = "s"
 lto = "thin"
+incremental = false
 # panic = "abort"
 codegen-units = 1
-incremental = false
 
 [profile.release-cli]
 inherits = "release"

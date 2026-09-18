@@ -1,13 +1,9 @@
 [package]
 name = "app-peer-comms"
 version.workspace = true
-authors.workspace = true
-description.workspace = true
 edition.workspace = true
+description.workspace = true
 license.workspace = true
-
-[lints]
-workspace = true
 
 [dependencies]
 anyhow.workspace = true
@@ -19,7 +15,7 @@ bytes = { version = "1.11.1", features = ["serde"] }
 data-encoding = "2.11.0"
 derive_more = "2.1.1"
 futures.workspace = true
-iroh = { version = "1.0", features = ["fast-apple-datapath", "metrics", "portmapper", "tls-aws-lc-rs"], default-features = false }
+iroh = { version = "1.0", default-features = false, features = ["fast-apple-datapath", "metrics", "portmapper", "tls-aws-lc-rs"] }
 iroh-blobs = "0.103"
 iroh-gossip = { version = "0.101", features = [] }
 iroh-mdns-address-lookup = "0.4.0"
@@ -35,3 +31,6 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 url.workspace = true
+
+[lints]
+workspace = true
