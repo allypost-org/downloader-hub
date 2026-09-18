@@ -7,7 +7,7 @@ The Discord bot at `bins/downloader-bot/src/cmd/discord/` has the infrastructure
 download pipeline. The Telegram bot at `bins/downloader-bot/src/cmd/telegram/`
 is the reference implementation. This plan brings the Discord bot to feature
 parity with Telegram: real `DownloadAndFix` via RPC, free-form URL intake,
-`process_work_request` pipeline (download → chunk → upload → mark complete),
+`process_work_request` pipeline (download -> chunk -> upload -> mark complete),
 with StatusMessage and file-grouping helpers.
 
 ---
@@ -18,10 +18,10 @@ with StatusMessage and file-grouping helpers.
 
 Four binaries share state via **Convex** and communicate via **iroh**:
 
-- `downloader-central` — axum HTTP server, coordination point
-- `downloader-worker` — performs downloads/processing
-- `downloader-bot` — multi-platform bot (Telegram + Discord), selected via subcommand
-- `downloader-cli` — local CLI tool
+- `downloader-central` - axum HTTP server, coordination point
+- `downloader-worker` - performs downloads/processing
+- `downloader-bot` - multi-platform bot (Telegram + Discord), selected via subcommand
+- `downloader-cli` - local CLI tool
 
 The bot's job is to:
 
@@ -41,32 +41,32 @@ travel through `StatusMessage` metadata embedded in each work request.
 | File                                 | Status                                                                                                                                                                          |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `cmd/discord/bot/mod.rs`             | `EventHandler` skeleton; `BotCommand::DownloadAndFix` is a **placeholder** that replies with `hello.txt` containing JSON of URLs; `watch_work_requests()` only does `dbg!(req)` |
-| `cmd/discord/broadcaster/mod.rs`     | **Complete** — global/channel/reply/edit/reaction/delete broadcasts with retry loop                                                                                             |
-| `cmd/discord/bot/error_formatter.rs` | **Dead code** — module is commented out (`// mod error_formatter;`); also uses unstable `is_multiple_of` feature                                                                |
+| `cmd/discord/broadcaster/mod.rs`     | **Complete** - global/channel/reply/edit/reaction/delete broadcasts with retry loop                                                                                             |
+| `cmd/discord/bot/error_formatter.rs` | **Dead code** - module is commented out (`// mod error_formatter;`); also uses unstable `is_multiple_of` feature                                                                |
 | `cmd/discord/config.rs`              | Thin wrapper around `DiscordBotConfig`                                                                                                                                          |
-| `cmd/_common/`                       | **Empty** — intended shared home (per AGENTS.md hint, never used yet)                                                                                                           |
+| `cmd/_common/`                       | **Empty** - intended shared home (per AGENTS.md hint, never used yet)                                                                                                           |
 
 The Discord bot has no:
 
 - URL intake from free-form messages
 - StatusMessage helper (Telegram's status message concept)
-- File-grouping helper (Discord's ≤10 attachments per message cap)
-- `process_work_request` pipeline (download → upload → complete)
+- File-grouping helper (Discord's <=10 attachments per message cap)
+- `process_work_request` pipeline (download -> upload -> complete)
 - Real work request creation via RPC
 - Owner save-directory support
 
-### Telegram bot — the reference
+### Telegram bot - the reference
 
 The Telegram implementation has all of the above. Key files (in
 `bins/downloader-bot/src/cmd/telegram/`):
 
-- `bot/mod.rs` — `TelegramBot` singleton (wraps teloxide bot, holds `Arc<TelegramBotConfig>`)
-- `bot/handlers/command/mod.rs` — handles `/help`, `/start`, `/about`, `/ping`
-- `bot/handlers/message/mod.rs` — `handle_message` (URL intake) + `process_work_request` (full pipeline)
-- `bot/helpers/status_message.rs` — `StatusMessage` struct, serialized into work-request metadata
-- `bot/helpers/file_group.rs` — chunks downloaded files into Telegram media groups (≤10 per group, size cap)
-- `bot/helpers/file_id.rs` — extracts Telegram file IDs from messages (note: **not actually used for downloads** — only as a "has media" check)
-- `common/downloadable/{mod.rs, impls/file_reference.rs}` — `Downloadable` trait + impl for `FileReference`
+- `bot/mod.rs` - `TelegramBot` singleton (wraps teloxide bot, holds `Arc<TelegramBotConfig>`)
+- `bot/handlers/command/mod.rs` - handles `/help`, `/start`, `/about`, `/ping`
+- `bot/handlers/message/mod.rs` - `handle_message` (URL intake) + `process_work_request` (full pipeline)
+- `bot/helpers/status_message.rs` - `StatusMessage` struct, serialized into work-request metadata
+- `bot/helpers/file_group.rs` - chunks downloaded files into Telegram media groups (<=10 per group, size cap)
+- `bot/helpers/file_id.rs` - extracts Telegram file IDs from messages (note: **not actually used for downloads** - only as a "has media" check)
+- `common/downloadable/{mod.rs, impls/file_reference.rs}` - `Downloadable` trait + impl for `FileReference`
 
 ### Key differences between Telegram and Discord relevant to this work
 
@@ -86,12 +86,12 @@ The Telegram implementation has all of the above. Key files (in
 
 ## Design Decisions (with rationale)
 
-### D1: Dispatch model — mention-gated CLI parsing for both DMs and guilds (no slash commands)
+### D1: Dispatch model - mention-gated CLI parsing for both DMs and guilds (no slash commands)
 
 **Decision:** Keep the existing dispatch logic verbatim:
 
-- DMs → always parse as command
-- Guilds → require explicit `@Bot` mention, then parse as command
+- DMs -> always parse as command
+- Guilds -> require explicit `@Bot` mention, then parse as command
 
 **Rationale:**
 
@@ -103,22 +103,22 @@ The Telegram implementation has all of the above. Key files (in
   ```
 - `mentions_me` is true **only** for explicit `@Bot` mentions (not `@everyone`/`@here`/`@role`).
 - A slash-command version was considered and rejected: it adds meaningful complexity (slash command registration, `InteractionCreate` handler, deferred-response lifecycle, dual StatusMessage abstraction) without clear UX benefit given the mention-based flow is already working.
-- CLI parsing via clap is shared between the two paths — single source of truth for the command grammar.
+- CLI parsing via clap is shared between the two paths - single source of truth for the command grammar.
 
 **Trade-off acknowledged:** Future Discord UX improvement could add slash commands on top; the design below (singleton DiscordBot, StatusMessage backed by message IDs only) is slash-command-agnostic and a future `/download` slash command could be added without restructuring.
 
-### D2: Where the shared `Downloadable` trait lives — `cmd/_common/`
+### D2: Where the shared `Downloadable` trait lives - `cmd/_common/`
 
-**Decision:** Move `cmd/telegram/common/downloadable/` → `cmd/_common/downloadable/` (verbatim). Telegram's `common/mod.rs` re-exports it so existing imports keep working.
+**Decision:** Move `cmd/telegram/common/downloadable/` -> `cmd/_common/downloadable/` (verbatim). Telegram's `common/mod.rs` re-exports it so existing imports keep working.
 
 **Rationale:**
 
-- The `cmd/_common/` directory already exists empty — clearly the intended shared location.
+- The `cmd/_common/` directory already exists empty - clearly the intended shared location.
 - The `Downloadable` trait + `FileReference` impl are **not** Telegram-specific; they're used to download via HTTP or iroh blob tickets, which both bots need.
 - Only one external import site (`cmd/telegram/bot/handlers/message/mod.rs:37`) uses the current path; a re-export keeps that working without churn.
-- Alternative (lift to `app-helpers` crate) was rejected — larger blast radius (touches shared crate), and this is bot-specific orchestration.
+- Alternative (lift to `app-helpers` crate) was rejected - larger blast radius (touches shared crate), and this is bot-specific orchestration.
 
-### D3: URL extraction — `linkify` crate
+### D3: URL extraction - `linkify` crate
 
 **Decision:** Add `linkify = "0.10"` to `bins/downloader-bot/Cargo.toml` and use it for URL extraction from message content.
 
@@ -126,11 +126,11 @@ The Telegram implementation has all of the above. Key files (in
 
 - Telegram uses teloxide's entity parser (Telegram-native). Discord has no equivalent in serenity.
 - Alternatives considered:
-  - **Naive whitespace split + `Url::parse`** — zero deps but mishandles URLs adjacent to punctuation, URLs in parens, trailing slashes, etc.
-  - **`linkify`** — well-maintained, zero-dep (no transitive deps), handles edge cases. Already idiomatic for Rust.
+  - **Naive whitespace split + `Url::parse`** - zero deps but mishandles URLs adjacent to punctuation, URLs in parens, trailing slashes, etc.
+  - **`linkify`** - well-maintained, zero-dep (no transitive deps), handles edge cases. Already idiomatic for Rust.
 - Discord attachment URLs (`msg.attachments[i].url`) come pre-parsed as `String`; we just `Url::parse` them and concatenate.
 
-### D4: Discord upload cap — configurable, default 25MB
+### D4: Discord upload cap - configurable, default 25MB
 
 **Decision:** Add `max_payload_size: Size` field to `DiscordBotConfig`, default `"25MB"`.
 
@@ -148,13 +148,13 @@ The Telegram implementation has all of the above. Key files (in
 **Rationale:**
 
 - Background tasks (`process_work_request`, `watch_work_requests`) need to make Discord API calls (edit status messages, upload attachments) without owning a `Context`.
-- `serenity::Client` exposes `pub http: Arc<Http>` — safe to clone pre-start.
+- `serenity::Client` exposes `pub http: Arc<Http>` - safe to clone pre-start.
 - The `Http` client is the only piece needed for sending messages / editing; cache is not required for these operations.
 - This matches Telegram's `TelegramBot::instance()` pattern, minimizing conceptual divergence.
 
-**Trade-off:** The serenity `Context` provides more than just `Http` (cache, shard info, etc.). For this bot's needs, `Http`-only is sufficient — no cache queries are required for sending/editing messages.
+**Trade-off:** The serenity `Context` provides more than just `Http` (cache, shard info, etc.). For this bot's needs, `Http`-only is sufficient - no cache queries are required for sending/editing messages.
 
-### D6: StatusMessage design — simple struct, `author_id` included
+### D6: StatusMessage design - simple struct, `author_id` included
 
 **Decision:**
 
@@ -181,12 +181,12 @@ struct StatusMessage {
 
 **Rationale:**
 
-- Telegram's StatusMessage awaits each API call — subsequent code knows whether the status update succeeded.
+- Telegram's StatusMessage awaits each API call - subsequent code knows whether the status update succeeded.
 - The broadcaster is fire-and-forget (`broadcast::Sender`); using it for status updates would lose ordering and error visibility.
 - Status updates are not on the hot path (one edit per state transition); direct calls are fine.
-- For the **final** file-upload messages, we use the broadcaster so the existing retry-on-`Io`/`ExceededLimit` loop applies — important for large uploads that may hit rate limits.
+- For the **final** file-upload messages, we use the broadcaster so the existing retry-on-`Io`/`ExceededLimit` loop applies - important for large uploads that may hit rate limits.
 
-### D8: `process_work_request` location — separate `handlers/work_request.rs`
+### D8: `process_work_request` location - separate `handlers/work_request.rs`
 
 **Decision:** Put `watch_work_requests` and `process_work_request` in a new `handlers/work_request.rs` file (mirror Telegram's `handlers/message.rs`).
 
@@ -203,7 +203,7 @@ struct StatusMessage {
 **Rationale:**
 
 - Mirrors Telegram's behavior (`telegram/.../message/mod.rs:305-322`) where the owner's downloads are also saved locally.
-- Telegram's check is `status_message.chat_id().as_user() == Some(owner_id)` — checking if the chat is a DM with the owner.
+- Telegram's check is `status_message.chat_id().as_user() == Some(owner_id)` - checking if the chat is a DM with the owner.
 - For Discord, `author_id` is the user-spread equivalent.
 
 ### D10: Cleanup of `error_formatter.rs`
@@ -213,7 +213,7 @@ struct StatusMessage {
 **Rationale:**
 
 - The module is currently unused (`// mod error_formatter;`).
-- It uses unstable `u32::is_multiple_of` (line 176) — would not compile on stable Rust.
+- It uses unstable `u32::is_multiple_of` (line 176) - would not compile on stable Rust.
 - Current behavior renders clap errors as plain text inside a code fence; that's acceptable.
 - Resurrecting it would require fixing the unstable-feature use and wiring it into clap's `ErrorFormatter` machinery. Not worth it for marginal formatting improvements.
 - The file is dead weight; deleting keeps the codebase clean.
@@ -224,7 +224,7 @@ struct StatusMessage {
 
 **Rationale:**
 
-- Telegram's dispatcher (`telegram/.../mod.rs:159-162`) does exactly this: command parse fails → `handle_message` runs.
+- Telegram's dispatcher (`telegram/.../mod.rs:159-162`) does exactly this: command parse fails -> `handle_message` runs.
 - Discord users in DMs (or after mentioning the bot in a guild) should be able to just paste URLs without `BotCommand::DownloadAndFix { urls: [...] }` CLI syntax.
 - This is more forgiving UX and matches the Telegram behavior user-expectation-wise.
 - The existing `BotCommand::DownloadAndFix` variant stays for explicit invocation (some users prefer the explicit form).
@@ -233,19 +233,19 @@ struct StatusMessage {
 
 ## Implementation Plan
 
-### Phase 1 — Shared `Downloadable` → `cmd/_common/`
+### Phase 1 - Shared `Downloadable` -> `cmd/_common/`
 
 1. **New** `bins/downloader-bot/src/cmd/_common/mod.rs`:
    ```rust
    pub mod downloadable;
    ```
-2. **Move** `cmd/telegram/common/downloadable/{mod.rs, impls/}` → `cmd/_common/downloadable/{mod.rs, impls/}` (verbatim — no code changes).
+2. **Move** `cmd/telegram/common/downloadable/{mod.rs, impls/}` -> `cmd/_common/downloadable/{mod.rs, impls/}` (verbatim - no code changes).
 3. **Edit** `cmd/telegram/common/mod.rs`: replace `pub mod downloadable;` with `pub use crate::cmd::_common::downloadable;`.
 4. **Edit** `cmd/mod.rs`: add `pub mod _common;` (alphabetically before `discord`).
 
 **Verification:** `just dev-build downloader-bot` should compile with no semantic changes (Telegram imports unchanged due to re-export).
 
-### Phase 2 — Config: add `max_payload_size`
+### Phase 2 - Config: add `max_payload_size`
 
 **Edit** `crates/app-config/src/conditional/discord_bot.rs`:
 
@@ -259,9 +259,9 @@ struct StatusMessage {
   pub max_payload_size: Size,
   ```
 
-**Verification:** `just dev-build downloader-bot` (and `downloader-central`, `downloader-worker` — they share the crate transitively).
+**Verification:** `just dev-build downloader-bot` (and `downloader-central`, `downloader-worker` - they share the crate transitively).
 
-### Phase 3 — `DiscordBot` singleton
+### Phase 3 - `DiscordBot` singleton
 
 **New** `bins/downloader-bot/src/cmd/discord/bot/discord_bot.rs`:
 
@@ -314,7 +314,7 @@ impl DiscordBot {
 DiscordBot::init(client.http.clone(), Arc::new(config.bot.clone()));
 ```
 
-### Phase 4 — StatusMessage helper
+### Phase 4 - StatusMessage helper
 
 **New** `bins/downloader-bot/src/cmd/discord/bot/helpers/mod.rs`:
 
@@ -332,16 +332,16 @@ pub mod file_group;
   - `msg_replying_to_id() -> MessageId`
   - `status_msg_id() -> Option<MessageId>`
   - `author_id() -> UserId`
-  - `send_sub_message(&self, text: &str) -> Option<Self>` — sends new message, returns new StatusMessage with `status_msg_id = Some(new_msg.id)`
-  - `send_additional_message(&self, text: &str) -> Option<Message>` — sends a sibling message, returns the raw `Message`
-  - `update_message(&mut self, text: &str)` — edits `status_msg_id` if set, else sends a new message and stores its ID. Retry on `UnknownMessage` (clear `status_msg_id` and resend).
-  - `delete_message(&self)` — deletes `status_msg_id` if set.
-  - `to_metadata() -> HashMap<String, String>` — `{"status_message": serde_json::to_string(self)}`
-  - `from_metadata(&HashMap) -> Result<Self, serde_json::Error>` — inverse.
+  - `send_sub_message(&self, text: &str) -> Option<Self>` - sends new message, returns new StatusMessage with `status_msg_id = Some(new_msg.id)`
+  - `send_additional_message(&self, text: &str) -> Option<Message>` - sends a sibling message, returns the raw `Message`
+  - `update_message(&mut self, text: &str)` - edits `status_msg_id` if set, else sends a new message and stores its ID. Retry on `UnknownMessage` (clear `status_msg_id` and resend).
+  - `delete_message(&self)` - deletes `status_msg_id` if set.
+  - `to_metadata() -> HashMap<String, String>` - `{"status_message": serde_json::to_string(self)}`
+  - `from_metadata(&HashMap) -> Result<Self, serde_json::Error>` - inverse.
 - All async API calls use `DiscordBot::bot()` (the `&Arc<Http>`).
-- Errors are logged (warn) and swallowed, matching Telegram's pattern — processing continues regardless of status-update failures.
+- Errors are logged (warn) and swallowed, matching Telegram's pattern - processing continues regardless of status-update failures.
 
-### Phase 5 — File-grouping helper
+### Phase 5 - File-grouping helper
 
 **New** `bins/downloader-bot/src/cmd/discord/bot/helpers/file_group.rs`:
 
@@ -369,11 +369,11 @@ Logic:
 
 **Simplification vs Telegram's `file_group.rs`:**
 
-- No `ChunkGroup` partitioning (Telegram has Document/Audio/Other groups because media groups must be homogeneous — Discord has no such constraint).
-- No image dimension checks (Telegram rejects oversized images to avoid JPG conversion — Discord handles attachments uniformly).
+- No `ChunkGroup` partitioning (Telegram has Document/Audio/Other groups because media groups must be homogeneous - Discord has no such constraint).
+- No image dimension checks (Telegram rejects oversized images to avoid JPG conversion - Discord handles attachments uniformly).
 - No GIF/PNG-as-document special-casing (Telegram-only quirk).
 
-### Phase 6 — Message handler refactor
+### Phase 6 - Message handler refactor
 
 **New** `bins/downloader-bot/src/cmd/discord/bot/handlers/mod.rs`:
 
@@ -452,16 +452,16 @@ pub async fn handle_download_request(msg: &Message, urls: Vec<Url>) -> Result<()
 The `message` handler:
 
 - Keep existing dispatch (mention check, mention-strip, CLI parse).
-- `BotCommand::Ping` / `About` — unchanged.
-- `BotCommand::DownloadAndFix { urls }` — call `handlers::message::handle_download_request(&msg, urls).await`.
+- `BotCommand::Ping` / `About` - unchanged.
+- `BotCommand::DownloadAndFix { urls }` - call `handlers::message::handle_download_request(&msg, urls).await`.
 - On `BotCommand::parse` error:
-  - If `urls_in_message(&msg)` non-empty → `handlers::message::handle_download_request(&msg, urls).await` (free-form intake).
-  - Else → send clap error via broadcaster (current behavior, minus `dbg!`).
+  - If `urls_in_message(&msg)` non-empty -> `handlers::message::handle_download_request(&msg, urls).await` (free-form intake).
+  - Else -> send clap error via broadcaster (current behavior, minus `dbg!`).
 - Remove placeholder `hello.txt` block.
 - Remove `dbg!(&e)`.
 - Remove `// MessageBroadcaster::get().send();` comment.
 
-### Phase 7 — Work request processing
+### Phase 7 - Work request processing
 
 **New** `bins/downloader-bot/src/cmd/discord/bot/handlers/work_request.rs`:
 
@@ -486,15 +486,15 @@ pub async fn watch_work_requests() -> Result<(), anyhow::Error> {
 
 1. Per-request `Semaphore` lock via static `LazyLock<Arc<Mutex<HashMap<Arc<str>, Arc<Semaphore>>>>>`.
 2. Branch on `work_request.status`:
-   - `Pending` → update status "Request is waiting for processing..." → return.
-   - `Failed { reason }` → update status "Request failed: {reason}" → return.
-   - No `progress_info()` → return.
-   - `!progress.waiting_for_requester` → if `progress.message`, show it → return.
-3. If `progress.files_data` is `None`/empty → mark complete via `RpcClient::work_request_complete`, delete status, return.
+   - `Pending` -> update status "Request is waiting for processing..." -> return.
+   - `Failed { reason }` -> update status "Request failed: {reason}" -> return.
+   - No `progress_info()` -> return.
+   - `!progress.waiting_for_requester` -> if `progress.message`, show it -> return.
+3. If `progress.files_data` is `None`/empty -> mark complete via `RpcClient::work_request_complete`, delete status, return.
 4. Parallel-download `progress.files_data` (`Semaphore::new(4)`, `TempFile::new_with_prefix("downloader-bot-dl-")`, `FileReference::download_into(tokio_file)`).
-5. Owner save-dir: if `status_message.author_id() == DiscordBot::owner_id()` and `DiscordBot::owner_download_dir().is_some()` → `copy_files_to_save_dir`.
+5. Owner save-dir: if `status_message.author_id() == DiscordBot::owner_id()` and `DiscordBot::owner_download_dir().is_some()` -> `copy_files_to_save_dir`.
 6. Chunk via `files_to_attachment_groups(downloaded_paths, DiscordBot::max_payload_size().bytes().cast_unsigned())`.
-7. Collect all errors (failed downloads, failed chunks, `work_request.errors`) → one additional status message.
+7. Collect all errors (failed downloads, failed chunks, `work_request.errors`) -> one additional status message.
 8. For each attachment group:
    - `DiscordBot::bot().send_message(channel_id, CreateMessage::new().add_file(att0).add_file(att1)...).reference_message((channel_id, msg_id))` via the **broadcaster** (for retry).
    - On broadcast failure (logged by the loop): continue.
@@ -505,21 +505,21 @@ pub async fn watch_work_requests() -> Result<(), anyhow::Error> {
 
 **Remove** the now-duplicated `watch_work_requests` and `handle_broadcast` from `bot/mod.rs` if appropriate (or keep `handle_broadcast` since it's still called by the cache_ready loop).
 
-### Phase 8 — Cleanup
+### Phase 8 - Cleanup
 
 - **Delete** `cmd/discord/bot/error_formatter.rs`.
 - **Edit** `cmd/discord/bot/mod.rs`: remove `// mod error_formatter;` line.
 
-### Phase 9 — Dependency + Verification
+### Phase 9 - Dependency + Verification
 
 - **Edit** `bins/downloader-bot/Cargo.toml`: add `linkify = "0.10"`.
-- Run `just fmt-dev` (per AGENTS.md — never raw `cargo fmt`/`clippy`).
+- Run `just fmt-dev` (per AGENTS.md - never raw `cargo fmt`/`clippy`).
 - Run `just dev-build downloader-bot`.
 - Manual smoke test via `mprocs` (`bot-discord` entry) with the dev token from `.env`:
-  - DM the bot a YouTube URL → expect status message → expect uploaded media.
-  - Mention `/ping` and `/about` in a guild → expect old behavior preserved.
-  - Mention with explicit `/download_and_fix <url>` in a guild → expect download flow.
-  - Send a message with a Discord attachment → expect it to be processed.
+  - DM the bot a YouTube URL -> expect status message -> expect uploaded media.
+  - Mention `/ping` and `/about` in a guild -> expect old behavior preserved.
+  - Mention with explicit `/download_and_fix <url>` in a guild -> expect download flow.
+  - Send a message with a Discord attachment -> expect it to be processed.
 
 ---
 
@@ -537,13 +537,13 @@ pub async fn watch_work_requests() -> Result<(), anyhow::Error> {
 | `crates/app-config/src/conditional/discord_bot.rs`                         | add `max_payload_size: Size` field                                                                                                                                  |
 | `bins/downloader-bot/src/cmd/discord/mod.rs`                               | `DiscordBot::init(...)` before `start_autosharded`                                                                                                                  |
 | `bins/downloader-bot/src/cmd/discord/bot/mod.rs`                           | real `DownloadAndFix` + free-form URL handling; remove placeholder + `dbg!`; drop `error_formatter`; declare new submodules; move `watch_work_requests` to handlers |
-| `bins/downloader-bot/src/cmd/discord/bot/discord_bot.rs`                   | **new** — `DiscordBot` singleton                                                                                                                                    |
+| `bins/downloader-bot/src/cmd/discord/bot/discord_bot.rs`                   | **new** - `DiscordBot` singleton                                                                                                                                    |
 | `bins/downloader-bot/src/cmd/discord/bot/helpers/mod.rs`                   | **new**                                                                                                                                                             |
 | `bins/downloader-bot/src/cmd/discord/bot/helpers/status_message.rs`        | **new**                                                                                                                                                             |
 | `bins/downloader-bot/src/cmd/discord/bot/helpers/file_group.rs`            | **new**                                                                                                                                                             |
 | `bins/downloader-bot/src/cmd/discord/bot/handlers/mod.rs`                  | **new**                                                                                                                                                             |
-| `bins/downloader-bot/src/cmd/discord/bot/handlers/message.rs`              | **new** — `handle_download_request` + URL extraction                                                                                                                |
-| `bins/downloader-bot/src/cmd/discord/bot/handlers/work_request.rs`         | **new** — `watch_work_requests` + `process_work_request`                                                                                                            |
+| `bins/downloader-bot/src/cmd/discord/bot/handlers/message.rs`              | **new** - `handle_download_request` + URL extraction                                                                                                                |
+| `bins/downloader-bot/src/cmd/discord/bot/handlers/work_request.rs`         | **new** - `watch_work_requests` + `process_work_request`                                                                                                            |
 | `bins/downloader-bot/src/cmd/discord/bot/error_formatter.rs`               | **delete**                                                                                                                                                          |
 
 ---
@@ -560,7 +560,7 @@ pub async fn watch_work_requests() -> Result<(), anyhow::Error> {
 
 ### Risk: `DiscordBot::init` race
 
-**Mitigation:** `init()` is called synchronously in `cmd::discord::run` before `client.start_autosharded()`. All background tasks that consume `DiscordBot::instance()` are spawned from `cache_ready`, which fires after the bot is fully connected — well after `init()` returns. The `OnceLock` provides a clean panic-on-double-init guard.
+**Mitigation:** `init()` is called synchronously in `cmd::discord::run` before `client.start_autosharded()`. All background tasks that consume `DiscordBot::instance()` are spawned from `cache_ready`, which fires after the bot is fully connected - well after `init()` returns. The `OnceLock` provides a clean panic-on-double-init guard.
 
 ### Trade-off: StatusMessage errors are swallowed
 
@@ -584,14 +584,14 @@ The current dispatch requires `@Bot` mention in guilds (verbose vs slash command
 
 ## Verification Steps for Future Agents Continuing This Work
 
-1. `just dev-build downloader-bot` — must compile cleanly.
-2. `just fmt-dev` — must pass (this runs rustfmt + clippy with the repo's pedantic+nursery config).
+1. `just dev-build downloader-bot` - must compile cleanly.
+2. `just fmt-dev` - must pass (this runs rustfmt + clippy with the repo's pedantic+nursery config).
 3. Check `bins/downloader-bot/src/cmd/discord/bot/error_formatter.rs` is gone.
 4. Check `bins/downloader-bot/src/cmd/_common/downloadable/` exists and Telegram's `common/mod.rs` re-exports it.
 5. Check `crates/app-config/src/conditional/discord_bot.rs` has `max_payload_size` with `default_value = "25MB"`.
 6. Check `linkify` is in `bins/downloader-bot/Cargo.toml`.
 7. Manual smoke test via `mprocs` (bot-discord entry):
-   - DM a URL → download completes.
-   - DM a Discord attachment → download completes.
-   - Mention `@bot /ping` in a guild → "Pong!".
-   - Mention `@bot <url>` in a guild → download completes.
+   - DM a URL -> download completes.
+   - DM a Discord attachment -> download completes.
+   - Mention `@bot /ping` in a guild -> "Pong!".
+   - Mention `@bot <url>` in a guild -> download completes.

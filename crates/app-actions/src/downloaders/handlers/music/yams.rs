@@ -12,7 +12,10 @@ use url::Url;
 use zip::ZipArchive;
 
 use super::Handler;
-use crate::downloaders::{DownloadRequest, Downloader, handlers::generic::Generic};
+use crate::{
+    ActionCtx,
+    downloaders::{DownloadRequest, Downloader, handlers::generic::Generic},
+};
 
 const API_URL: &str = "https://yams.tf/api";
 const QUALITY_MAP: &[(&str, &str)] = &[
@@ -21,7 +24,6 @@ const QUALITY_MAP: &[(&str, &str)] = &[
     ("tidal", "3"),
     ("apple", "high"),
     ("deezer", "2"),
-    // ("youtube", "0"),
 ];
 
 type YamsId = u64;
@@ -46,8 +48,12 @@ pub struct YamsProvider;
 
 #[async_trait::async_trait]
 impl Handler for YamsProvider {
-    #[tracing::instrument(skip(self, request), fields(url = ?request.url.url().as_str()))]
-    async fn download(&self, request: &DownloadRequest) -> anyhow::Result<PathBuf> {
+    #[tracing::instrument(skip(self, ctx, request), fields(url = ?request.url.url().as_str()))]
+    async fn download(
+        &self,
+        ctx: &ActionCtx,
+        request: &DownloadRequest,
+    ) -> anyhow::Result<PathBuf> {
         let download_dir = request.download_dir();
         let song_url = request.url.url();
         debug!("Downloading song");
@@ -73,6 +79,7 @@ impl Handler for YamsProvider {
 
         let song_zip_path = Generic
             .download(
+                ctx,
                 &DownloadRequest::from_url(&download_url, download_dir)
                     .with_downloader_options(request.downloader_options.clone()),
             )

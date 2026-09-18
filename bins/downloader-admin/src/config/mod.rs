@@ -1,8 +1,7 @@
 use std::path::PathBuf;
 
 use app_config::{
-    BUILD_DATE, BUILD_RUSTC_VERSION, Dumpable, GlobalConfig, LogFormat, common::APPLICATION_NAME,
-    validators::print_validation_errors,
+    BUILD_DATE, BUILD_RUSTC_VERSION, BootConfig, Dumpable, LogFormat, common::APPLICATION_NAME,
 };
 use clap::Parser;
 use const_format::concatcp;
@@ -15,7 +14,7 @@ pub static APPLICATION_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub static APPLICATION_NAME_WITH_VERSION: &str =
     concatcp!(APPLICATION_NAME, " v", APPLICATION_VERSION);
 
-#[derive(Debug, Clone, Serialize, Deserialize, Parser, Validate, GlobalConfig, Dumpable)]
+#[derive(Debug, Clone, Serialize, Deserialize, Parser, Validate, Dumpable)]
 pub struct Config {
     /// If set, the log will be written to this file as well as stdout
     #[clap(long, env = "DOWNLOADER_HUB_ADMIN_LOG_FILE")]
@@ -43,6 +42,7 @@ pub struct Config {
     pub log_file_level: Option<String>,
 
     #[clap(subcommand)]
+    #[validate(nested)]
     pub cmd: CmdConfig,
 
     #[clap(flatten)]
@@ -51,24 +51,9 @@ pub struct Config {
     dump: DumpConfig,
 }
 
+impl BootConfig for Config {}
+
 impl Config {
-    pub fn init_parsed() -> Result<&'static Self, String> {
-        let parsed = Self::parse().validate_or_exit().dump_if_needed();
-
-        Self::init(parsed)
-    }
-
-    #[inline]
-    fn validate_or_exit(self) -> Self {
-        if let Err(e) = self.cmd.validate() {
-            eprintln!("Errors validating configuration:");
-            print_validation_errors(&e, "  ", 1);
-            std::process::exit(1);
-        }
-
-        self
-    }
-
     pub const fn build_date() -> &'static str {
         BUILD_DATE
     }

@@ -1,12 +1,14 @@
-use app_database::Database;
 use futures::StreamExt;
 use tracing::{debug, warn};
 
-use super::{SessionRegistry, sessions};
+use super::session::SessionRegistry;
+use crate::cmd::central::components::state::SharedCentralState;
 
-pub async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let registry: SessionRegistry = sessions().clone();
-    let mut stream = Database::global().authed_watch_all().await?;
+pub async fn run(
+    state: SharedCentralState,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let registry: SessionRegistry = state.sessions.clone();
+    let mut stream = state.db().authed_watch_all().await?;
 
     debug!("Authed revocation watcher started");
 

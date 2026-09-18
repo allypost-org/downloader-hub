@@ -49,8 +49,11 @@ fn parse_status_type(s: &str) -> Option<RequestStatusType> {
     }
 }
 
-pub async fn list_counts(_session: AdminSession) -> impl IntoResponse {
-    match Database::global().requests_counts().await {
+pub async fn list_counts(
+    _session: AdminSession,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    match state.db.requests_counts().await {
         Ok(counts) => V1Response::ok(counts),
         Err(e) => {
             tracing::error!(?e, "list_counts failed");
@@ -73,8 +76,11 @@ fn parse_log_settings_scope(scope: &str) -> Option<LogSettingsScope> {
         .find(|candidate| candidate.as_str() == scope)
 }
 
-pub async fn list_log_settings(_session: AdminSession) -> impl IntoResponse {
-    match Database::global().log_settings_list().await {
+pub async fn list_log_settings(
+    _session: AdminSession,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    match state.db.log_settings_list().await {
         Ok(rows) => {
             let settings = LOG_SETTINGS_SCOPES.map(|scope| {
                 rows.iter()
@@ -103,6 +109,7 @@ pub struct SetLogSettingsBody {
 
 pub async fn set_log_settings(
     _session: WriteSession,
+    State(state): State<AppState>,
     Path(scope): Path<String>,
     Json(body): Json<SetLogSettingsBody>,
 ) -> impl IntoResponse {
@@ -120,7 +127,8 @@ pub async fn set_log_settings(
         }
     }
 
-    match Database::global()
+    match state
+        .db
         .log_settings_set(scope, console.clone(), file.clone())
         .await
     {
@@ -136,8 +144,11 @@ pub async fn set_log_settings(
     }
 }
 
-pub async fn list_secrets(_session: AdminSession) -> impl IntoResponse {
-    match Database::global().secrets_list().await {
+pub async fn list_secrets(
+    _session: AdminSession,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    match state.db.secrets_list().await {
         Ok(rows) => V1Response::ok(rows),
         Err(e) => {
             tracing::error!(?e, "list_secrets failed");
@@ -159,6 +170,7 @@ pub struct SetSecretBody {
 
 pub async fn set_secret(
     _session: WriteSession,
+    State(state): State<AppState>,
     Json(body): Json<SetSecretBody>,
 ) -> impl IntoResponse {
     let name = body.name.trim();
@@ -176,7 +188,8 @@ pub async fn set_secret(
         .iter()
         .map(AccountRefBody::to_place_ref)
         .collect();
-    match Database::global()
+    match state
+        .db
         .secrets_set(name, value, &allowed_users, &allowed_places)
         .await
     {
@@ -194,8 +207,12 @@ pub async fn set_secret(
     }
 }
 
-pub async fn remove_secret(_session: WriteSession, Path(name): Path<String>) -> impl IntoResponse {
-    match Database::global().secrets_remove(&name).await {
+pub async fn remove_secret(
+    _session: WriteSession,
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    match state.db.secrets_remove(&name).await {
         Ok(()) => V1Response::ok(serde_json::json!({ "removed": true })),
         Err(e) => {
             tracing::error!(?e, "remove_secret failed");
@@ -208,7 +225,7 @@ const REQUESTS_LIMIT_MAX: i64 = 500;
 
 pub async fn list_requests(
     _session: AdminSession,
-    _state: State<AppState>,
+    State(state): State<AppState>,
     Query(q): Query<ListRequestsQuery>,
 ) -> impl IntoResponse {
     let Some(status) = q.status.as_deref().and_then(parse_status_type) else {
@@ -218,7 +235,8 @@ pub async fn list_requests(
         );
     };
     let limit = q.limit.map(|n| n.clamp(1, REQUESTS_LIMIT_MAX));
-    match Database::global()
+    match state
+        .db
         .requests_get_by_status(status, limit, q.cursor)
         .await
     {
@@ -241,6 +259,7 @@ pub struct ListRequestsByAccountQuery {
 
 pub async fn list_requests_by_user(
     _session: AdminSession,
+    State(state): State<AppState>,
     Query(q): Query<ListRequestsByAccountQuery>,
 ) -> impl IntoResponse {
     if q.id.is_empty() {
@@ -254,7 +273,8 @@ pub async fn list_requests_by_user(
         );
     }
     let limit = q.limit.map(|n| n.clamp(1, REQUESTS_LIMIT_MAX));
-    match Database::global()
+    match state
+        .db
         .requests_get_by_ordered_by(q.platform, q.id.as_str(), status, limit, q.cursor)
         .await
     {
@@ -268,6 +288,7 @@ pub async fn list_requests_by_user(
 
 pub async fn list_requests_by_place(
     _session: AdminSession,
+    State(state): State<AppState>,
     Query(q): Query<ListRequestsByAccountQuery>,
 ) -> impl IntoResponse {
     if q.id.is_empty() {
@@ -281,7 +302,8 @@ pub async fn list_requests_by_place(
         );
     }
     let limit = q.limit.map(|n| n.clamp(1, REQUESTS_LIMIT_MAX));
-    match Database::global()
+    match state
+        .db
         .requests_get_by_ordered_in(q.platform, q.id.as_str(), status, limit, q.cursor)
         .await
     {
@@ -293,11 +315,12 @@ pub async fn list_requests_by_place(
     }
 }
 
-pub async fn get_request(_session: AdminSession, Path(id): Path<String>) -> impl IntoResponse {
-    match Database::global()
-        .requests_get(Arc::from(id.as_str()))
-        .await
-    {
+pub async fn get_request(
+    _session: AdminSession,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match state.db.requests_get(Arc::from(id.as_str())).await {
         Ok(req) => V1Response::ok(req),
         Err(e) => {
             tracing::error!(?e, "get_request failed");
@@ -306,11 +329,12 @@ pub async fn get_request(_session: AdminSession, Path(id): Path<String>) -> impl
     }
 }
 
-pub async fn retry_request(_session: WriteSession, Path(id): Path<String>) -> impl IntoResponse {
-    match Database::global()
-        .requests_retry(Arc::from(id.as_str()))
-        .await
-    {
+pub async fn retry_request(
+    _session: WriteSession,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match state.db.requests_retry(Arc::from(id.as_str())).await {
         Ok(RetryResult::Ok) => V1Response::ok(serde_json::json!({ "retried": true })),
         Ok(RetryResult::RequestNotFound) => {
             V1Response::err(StatusCode::NOT_FOUND, "request not found")
@@ -326,8 +350,13 @@ pub async fn retry_request(_session: WriteSession, Path(id): Path<String>) -> im
     }
 }
 
-pub async fn cancel_request(session: WriteSession, Path(id): Path<String>) -> impl IntoResponse {
-    match Database::global()
+pub async fn cancel_request(
+    session: WriteSession,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match state
+        .db
         .requests_cancel(Arc::from(id.as_str()), Arc::from(session.admin_id()))
         .await
     {
@@ -342,11 +371,12 @@ pub async fn cancel_request(session: WriteSession, Path(id): Path<String>) -> im
     }
 }
 
-pub async fn remove_request(_session: WriteSession, Path(id): Path<String>) -> impl IntoResponse {
-    match Database::global()
-        .requests_remove(Arc::from(id.as_str()))
-        .await
-    {
+pub async fn remove_request(
+    _session: WriteSession,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match state.db.requests_remove(Arc::from(id.as_str())).await {
         Ok(RemoveResult::Ok) => V1Response::ok(serde_json::json!({ "removed": true })),
         Ok(RemoveResult::RequestNotFound) => {
             V1Response::err(StatusCode::NOT_FOUND, "request not found")
@@ -358,8 +388,13 @@ pub async fn remove_request(_session: WriteSession, Path(id): Path<String>) -> i
     }
 }
 
-pub async fn clear_refusals(_session: WriteSession, Path(id): Path<String>) -> impl IntoResponse {
-    match Database::global()
+pub async fn clear_refusals(
+    _session: WriteSession,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match state
+        .db
         .requests_clear_refusals(Arc::from(id.as_str()))
         .await
     {
@@ -385,11 +420,12 @@ pub struct MeResponse {
 }
 
 pub async fn login(
-    _state: State<AppState>,
+    State(state): State<AppState>,
     jar: axum_extra::extract::SignedCookieJar,
     Json(body): Json<LoginBody>,
 ) -> axum::response::Response {
-    match Database::global()
+    match state
+        .db
         .authed_get_info_by_token(Arc::from(body.token.as_str()))
         .await
     {
@@ -425,9 +461,10 @@ pub async fn logout(jar: axum_extra::extract::SignedCookieJar) -> axum::response
     (jar, resp).into_response()
 }
 
-pub async fn me(session: AdminSession) -> impl IntoResponse {
+pub async fn me(session: AdminSession, State(state): State<AppState>) -> impl IntoResponse {
     let readonly = session.readonly();
-    match Database::global()
+    match state
+        .db
         .authed_get_info_by_id(Arc::from(session.admin_id()))
         .await
     {
@@ -443,8 +480,11 @@ pub async fn me(session: AdminSession) -> impl IntoResponse {
     }
 }
 
-pub async fn list_authed(_session: AdminSession) -> impl IntoResponse {
-    match Database::global().authed_list_full().await {
+pub async fn list_authed(
+    _session: AdminSession,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    match state.db.authed_list_full().await {
         Ok(rows) => V1Response::ok(rows),
         Err(e) => {
             tracing::error!(?e, "list_authed failed");
@@ -469,9 +509,11 @@ pub struct CreateAuthedBody {
 
 pub async fn create_authed(
     _session: WriteSession,
+    State(state): State<AppState>,
     Json(body): Json<CreateAuthedBody>,
 ) -> impl IntoResponse {
-    match Database::global()
+    match state
+        .db
         .authed_create(
             &body.name,
             body.for_role,
@@ -489,11 +531,12 @@ pub async fn create_authed(
     }
 }
 
-pub async fn revoke_authed(_session: WriteSession, Path(id): Path<String>) -> impl IntoResponse {
-    match Database::global()
-        .authed_revoke(Arc::from(id.as_str()))
-        .await
-    {
+pub async fn revoke_authed(
+    _session: WriteSession,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match state.db.authed_revoke(Arc::from(id.as_str())).await {
         Ok(AuthedRevokeResult::Ok) => V1Response::ok(serde_json::json!({ "revoked": true })),
         Ok(AuthedRevokeResult::NotFound) => {
             V1Response::err(StatusCode::NOT_FOUND, "authed not found")
@@ -505,11 +548,12 @@ pub async fn revoke_authed(_session: WriteSession, Path(id): Path<String>) -> im
     }
 }
 
-pub async fn rotate_authed(_session: WriteSession, Path(id): Path<String>) -> impl IntoResponse {
-    match Database::global()
-        .authed_rotate_token(Arc::from(id.as_str()))
-        .await
-    {
+pub async fn rotate_authed(
+    _session: WriteSession,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match state.db.authed_rotate_token(Arc::from(id.as_str())).await {
         Ok(AuthedRotateTokenResult::Ok { token }) => {
             V1Response::ok(serde_json::json!({ "token": token }))
         }
@@ -523,11 +567,12 @@ pub async fn rotate_authed(_session: WriteSession, Path(id): Path<String>) -> im
     }
 }
 
-pub async fn remove_authed(_session: WriteSession, Path(id): Path<String>) -> impl IntoResponse {
-    match Database::global()
-        .authed_remove(Arc::from(id.as_str()))
-        .await
-    {
+pub async fn remove_authed(
+    _session: WriteSession,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match state.db.authed_remove(Arc::from(id.as_str())).await {
         Ok(AuthedRemoveResult::Ok) => V1Response::ok(serde_json::json!({ "removed": true })),
         Ok(AuthedRemoveResult::NotFound) => {
             V1Response::err(StatusCode::NOT_FOUND, "authed not found")
@@ -551,7 +596,7 @@ pub async fn connections(
             Err(e) => tracing::warn!(?e, "central /connections proxy failed; falling back to DB"),
         }
     }
-    match Database::global().connections_list().await {
+    match state.db.connections_list().await {
         Ok(rows) => V1Response::ok(serde_json::json!({ "connections": rows })),
         Err(e) => {
             tracing::error!(?e, "connections_list failed");
@@ -560,8 +605,11 @@ pub async fn connections(
     }
 }
 
-pub async fn list_account_users(_session: AdminSession) -> impl IntoResponse {
-    match Database::global().accounts_list_users().await {
+pub async fn list_account_users(
+    _session: AdminSession,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    match state.db.accounts_list_users().await {
         Ok(rows) => V1Response::ok(rows),
         Err(e) => {
             tracing::error!(?e, "list_account_users failed");
@@ -573,8 +621,11 @@ pub async fn list_account_users(_session: AdminSession) -> impl IntoResponse {
     }
 }
 
-pub async fn list_account_places(_session: AdminSession) -> impl IntoResponse {
-    match Database::global().accounts_list_places().await {
+pub async fn list_account_places(
+    _session: AdminSession,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    match state.db.accounts_list_places().await {
         Ok(rows) => V1Response::ok(rows),
         Err(e) => {
             tracing::error!(?e, "list_account_places failed");
@@ -595,6 +646,7 @@ pub struct AccountUserPatchBody {
 
 pub async fn update_account_user(
     _session: WriteSession,
+    State(state): State<AppState>,
     Path(id): Path<String>,
     Json(body): Json<AccountUserPatchBody>,
 ) -> impl IntoResponse {
@@ -603,7 +655,7 @@ pub async fn update_account_user(
         display_name: body.display_name.unwrap_or_default(),
         is_bot: body.is_bot.unwrap_or_default(),
     };
-    match Database::global().accounts_update_user(&id, patch).await {
+    match state.db.accounts_update_user(&id, patch).await {
         Ok(res) => V1Response::ok(res),
         Err(e) => {
             tracing::error!(?e, "update_account_user failed");
@@ -622,6 +674,7 @@ pub struct AccountPlacePatchBody {
 
 pub async fn update_account_place(
     _session: WriteSession,
+    State(state): State<AppState>,
     Path(id): Path<String>,
     Json(body): Json<AccountPlacePatchBody>,
 ) -> impl IntoResponse {
@@ -631,7 +684,7 @@ pub async fn update_account_place(
         username: body.username.unwrap_or_default(),
         parent_platform_id: body.parent_platform_id.unwrap_or_default(),
     };
-    match Database::global().accounts_update_place(&id, patch).await {
+    match state.db.accounts_update_place(&id, patch).await {
         Ok(res) => V1Response::ok(res),
         Err(e) => {
             tracing::error!(?e, "update_account_place failed");
@@ -648,20 +701,20 @@ fn refresh_idempotency_key(kind: &str, platform: Platform, platform_id: &str) ->
 }
 
 async fn enqueue_account_refresh(
+    db: &Database,
     admin_id: &str,
     payload: RefreshAccountInfoPayload,
     idempotency_key: String,
 ) -> Result<app_database::api::requests::RequestIdResponse, app_database::DatabaseError> {
-    Database::global()
-        .requests_add(
-            Arc::from(admin_id),
-            RequestInfo::RefreshAccountInfo(payload),
-            HashMap::new(),
-            Some(idempotency_key),
-            None,
-            None,
-        )
-        .await
+    db.requests_add(
+        Arc::from(admin_id),
+        RequestInfo::RefreshAccountInfo(payload),
+        HashMap::new(),
+        Some(idempotency_key),
+        None,
+        None,
+    )
+    .await
 }
 
 const fn is_stale_user(user: &AccountUserInfo) -> bool {
@@ -700,9 +753,10 @@ pub struct RefreshEnqueueResponse {
 
 pub async fn refresh_account_user(
     session: WriteSession,
+    State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    let user = match Database::global().accounts_get_user(&id).await {
+    let user = match state.db.accounts_get_user(&id).await {
         Ok(Some(user)) => user,
         Ok(None) => {
             return V1Response::<RefreshEnqueueResponse>::err(
@@ -728,7 +782,7 @@ pub async fn refresh_account_user(
     };
     let idempotency_key = refresh_idempotency_key("user", user.platform, &user.platform_id);
 
-    match enqueue_account_refresh(session.admin_id(), payload, idempotency_key).await {
+    match enqueue_account_refresh(&state.db, session.admin_id(), payload, idempotency_key).await {
         Ok(res) => V1Response::ok(RefreshEnqueueResponse { request_id: res.id }),
         Err(e) => {
             tracing::error!(?e, "refresh_account_user enqueue failed");
@@ -742,9 +796,10 @@ pub async fn refresh_account_user(
 
 pub async fn refresh_account_place(
     session: WriteSession,
+    State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    let place = match Database::global().accounts_get_place(&id).await {
+    let place = match state.db.accounts_get_place(&id).await {
         Ok(Some(place)) => place,
         Ok(None) => {
             return V1Response::<RefreshEnqueueResponse>::err(
@@ -770,7 +825,7 @@ pub async fn refresh_account_place(
     };
     let idempotency_key = refresh_idempotency_key("place", place.platform, &place.platform_id);
 
-    match enqueue_account_refresh(session.admin_id(), payload, idempotency_key).await {
+    match enqueue_account_refresh(&state.db, session.admin_id(), payload, idempotency_key).await {
         Ok(res) => V1Response::ok(RefreshEnqueueResponse { request_id: res.id }),
         Err(e) => {
             tracing::error!(?e, "refresh_account_place enqueue failed");
@@ -787,10 +842,13 @@ pub struct RefreshStaleResponse {
     pub enqueued: u64,
 }
 
-pub async fn refresh_stale_accounts(session: WriteSession) -> impl IntoResponse {
+pub async fn refresh_stale_accounts(
+    session: WriteSession,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
     let (users, places) = match tokio::try_join!(
-        Database::global().accounts_list_users(),
-        Database::global().accounts_list_places(),
+        state.db.accounts_list_users(),
+        state.db.accounts_list_places(),
     ) {
         Ok(pair) => pair,
         Err(e) => {
@@ -841,7 +899,7 @@ pub async fn refresh_stale_accounts(session: WriteSession) -> impl IntoResponse 
             users: refs,
             places: vec![],
         };
-        match enqueue_account_refresh(admin_id, payload, idempotency_key).await {
+        match enqueue_account_refresh(&state.db, admin_id, payload, idempotency_key).await {
             Ok(_) => enqueued += 1,
             Err(e) => {
                 tracing::error!(?e, "refresh_stale_accounts user batch failed");
@@ -874,7 +932,7 @@ pub async fn refresh_stale_accounts(session: WriteSession) -> impl IntoResponse 
             users: vec![],
             places: refs,
         };
-        match enqueue_account_refresh(admin_id, payload, idempotency_key).await {
+        match enqueue_account_refresh(&state.db, admin_id, payload, idempotency_key).await {
             Ok(_) => enqueued += 1,
             Err(e) => {
                 tracing::error!(?e, "refresh_stale_accounts place batch failed");
@@ -889,11 +947,11 @@ pub async fn refresh_stale_accounts(session: WriteSession) -> impl IntoResponse 
     V1Response::ok(RefreshStaleResponse { enqueued })
 }
 
-pub async fn backfill_ordered_refs(_session: WriteSession) -> impl IntoResponse {
-    match Database::global()
-        .requests_start_backfill_ordered_refs()
-        .await
-    {
+pub async fn backfill_ordered_refs(
+    _session: WriteSession,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    match state.db.requests_start_backfill_ordered_refs().await {
         Ok(res) => V1Response::ok(res),
         Err(e) => {
             tracing::error!(?e, "backfill_ordered_refs failed");
@@ -982,10 +1040,11 @@ pub struct ListRestrictionsQuery {
 
 pub async fn list_restrictions(
     _session: AdminSession,
+    State(state): State<AppState>,
     Query(q): Query<ListRestrictionsQuery>,
 ) -> impl IntoResponse {
     match q.kind.as_deref() {
-        Some("ban") => match Database::global().restrictions_list_bans().await {
+        Some("ban") => match state.db.restrictions_list_bans().await {
             Ok(rows) => V1Response::ok(rows),
             Err(e) => {
                 tracing::error!(?e, "list_restrictions(ban) failed");
@@ -995,7 +1054,7 @@ pub async fn list_restrictions(
                 )
             }
         },
-        Some("limit") => match Database::global().restrictions_list_limits().await {
+        Some("limit") => match state.db.restrictions_list_limits().await {
             Ok(rows) => V1Response::ok(rows),
             Err(e) => {
                 tracing::error!(?e, "list_restrictions(limit) failed");
@@ -1090,6 +1149,7 @@ pub struct CreateRestrictionBody {
 
 pub async fn create_restriction(
     _session: WriteSession,
+    State(state): State<AppState>,
     Json(body): Json<CreateRestrictionBody>,
 ) -> impl IntoResponse {
     if body.user.is_none() && body.place.is_none() {
@@ -1109,7 +1169,8 @@ pub async fn create_restriction(
     };
     let user_ref = body.user.as_ref().map(AccountRefBody::to_user_ref);
     let place_ref = body.place.as_ref().map(AccountRefBody::to_place_ref);
-    match Database::global()
+    match state
+        .db
         .restriction_create(user_ref.as_ref(), place_ref.as_ref(), &rule)
         .await
     {
@@ -1123,12 +1184,10 @@ pub async fn create_restriction(
 
 pub async fn remove_restriction(
     _session: WriteSession,
+    State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    match Database::global()
-        .restriction_remove(Arc::from(id.as_str()))
-        .await
-    {
+    match state.db.restriction_remove(Arc::from(id.as_str())).await {
         Ok(app_database::api::restrictions::RestrictionRemoveResult::Ok) => {
             V1Response::ok(serde_json::json!({ "removed": true }))
         }
@@ -1144,6 +1203,7 @@ pub async fn remove_restriction(
 
 pub async fn replace_restriction(
     _session: WriteSession,
+    State(state): State<AppState>,
     Path(id): Path<String>,
     Json(body): Json<CreateRestrictionBody>,
 ) -> impl IntoResponse {
@@ -1161,7 +1221,8 @@ pub async fn replace_restriction(
     };
     let user_ref = body.user.as_ref().map(AccountRefBody::to_user_ref);
     let place_ref = body.place.as_ref().map(AccountRefBody::to_place_ref);
-    match Database::global()
+    match state
+        .db
         .restriction_replace(
             Arc::from(id.as_str()),
             user_ref.as_ref(),

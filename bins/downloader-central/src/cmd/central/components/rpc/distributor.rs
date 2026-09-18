@@ -43,9 +43,9 @@ pub struct WorkDistributor {
 }
 
 impl WorkDistributor {
-    pub fn spawn() -> (Self, tokio::task::JoinHandle<()>) {
+    pub fn spawn(db: Arc<Database>) -> (Self, tokio::task::JoinHandle<()>) {
         let (cmd_tx, cmd_rx) = mpsc::channel(256);
-        let handle = tokio::spawn(run(cmd_rx));
+        let handle = tokio::spawn(run(cmd_rx, db));
         (Self { cmd_tx }, handle)
     }
 
@@ -115,7 +115,7 @@ impl WorkDistributor {
     }
 }
 
-async fn run(mut rx: mpsc::Receiver<Cmd>) {
+async fn run(mut rx: mpsc::Receiver<Cmd>, db: Arc<Database>) {
     let mut waiting = VecDeque::new();
     let mut available = Vec::new();
 
@@ -123,7 +123,7 @@ async fn run(mut rx: mpsc::Receiver<Cmd>) {
         match cmd {
             Cmd::Available(items) => {
                 available = items.to_vec();
-                distribute(&mut waiting, &mut available).await;
+                distribute(&mut waiting, &mut available, &db).await;
                 metrics::set_parked_workers(waiting.len());
             }
             Cmd::GetWorkItem(waiter) => {
@@ -132,7 +132,7 @@ async fn run(mut rx: mpsc::Receiver<Cmd>) {
                     parked = waiting.len(),
                     "getWorkItem"
                 );
-                if let Some(waiter) = hand_to(waiter, &mut available).await {
+                if let Some(waiter) = hand_to(waiter, &mut available, &db).await {
                     waiting.push_back(waiter);
                     debug!(
                         parked = waiting.len(),
@@ -186,7 +186,11 @@ async fn run(mut rx: mpsc::Receiver<Cmd>) {
     warn!("WorkDistributor task exited");
 }
 
-async fn hand_to(waiter: Waiter, available: &mut Vec<RequestInfoResponse>) -> Option<Waiter> {
+async fn hand_to(
+    waiter: Waiter,
+    available: &mut Vec<RequestInfoResponse>,
+    db: &Database,
+) -> Option<Waiter> {
     let waiter = waiter;
     while let Some(pos) = available
         .iter()
@@ -196,16 +200,13 @@ async fn hand_to(waiter: Waiter, available: &mut Vec<RequestInfoResponse>) -> Op
         let req_id = item.request_id.clone();
         let authed_id = waiter.authed_id.clone();
 
-        match Database::global()
-            .requests_take(req_id.clone(), authed_id.clone())
-            .await
-        {
+        match db.requests_take(req_id.clone(), authed_id.clone()).await {
             Ok(DbTakeResult::Ok(box_req)) => {
                 let wr = match box_req.as_ref().try_into() {
                     Ok(w) => w,
                     Err(e) => {
                         error!(?e, ?req_id, "work request convert failed; releasing item");
-                        let _ = Database::global().requests_release(req_id, authed_id).await;
+                        let _ = db.requests_release(req_id, authed_id).await;
                         continue;
                     }
                 };
@@ -216,7 +217,7 @@ async fn hand_to(waiter: Waiter, available: &mut Vec<RequestInfoResponse>) -> Op
                     .is_err()
                 {
                     warn!(?req_id, "Worker vanished during handoff; releasing item");
-                    let _ = Database::global().requests_release(req_id, authed_id).await;
+                    let _ = db.requests_release(req_id, authed_id).await;
                 }
                 metrics::work_item_dispatched();
                 return None;
@@ -229,7 +230,11 @@ async fn hand_to(waiter: Waiter, available: &mut Vec<RequestInfoResponse>) -> Op
     Some(waiter)
 }
 
-async fn distribute(waiting: &mut VecDeque<Waiter>, available: &mut Vec<RequestInfoResponse>) {
+async fn distribute(
+    waiting: &mut VecDeque<Waiter>,
+    available: &mut Vec<RequestInfoResponse>,
+    db: &Database,
+) {
     loop {
         if available.is_empty() || waiting.is_empty() {
             return;
@@ -243,7 +248,7 @@ async fn distribute(waiting: &mut VecDeque<Waiter>, available: &mut Vec<RequestI
             return;
         };
         let waiter = waiting.remove(idx).expect("positioned index");
-        if let Some(waiter) = hand_to(waiter, available).await {
+        if let Some(waiter) = hand_to(waiter, available, db).await {
             waiting.push_back(waiter);
             return;
         }

@@ -106,7 +106,7 @@ impl Database {
     }
 
     /// Live subscription to the full authed list (including names). Emits only
-    /// when the `authed:listFull` *result* changes — cheaper and more correct
+    /// when the `authed:listFull` *result* changes - cheaper and more correct
     /// than watching `authed:getAll` (which carries no names) and re-fetching.
     pub async fn authed_watch_full(
         &self,

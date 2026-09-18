@@ -1,12 +1,11 @@
 pub mod helpers;
 
-use std::{
-    ops::Deref,
-    string::ToString,
-    sync::{Arc, OnceLock},
-};
+use std::{ops::Deref, string::ToString, sync::Arc};
 
-use app_config::{common::Size, conditional::telegram_bot::TelegramBotConfig};
+use app_config::{
+    common::{ProgramPathConfig, Size},
+    conditional::telegram_bot::TelegramBotConfig,
+};
 use teloxide::{
     adaptors::trace, prelude::*, requests::RequesterExt, types::ParseMode,
     utils::command::BotCommands,
@@ -21,11 +20,10 @@ pub type TeloxideBot =
 const OFFICIAL_API_MAX_FILESIZE: Size = Size::from_const(50 * size::MEGABYTE);
 const LOCAL_API_MAX_FILESIZE: Size = Size::from_const(2 * size::GIGABYTE);
 
-static TELEGRAM_BOT: OnceLock<TelegramBot> = OnceLock::new();
-
 pub struct TelegramBot {
     inner: TeloxideBot,
     config: Arc<TelegramBotConfig>,
+    dependency_paths: Arc<ProgramPathConfig>,
 }
 
 impl Deref for TelegramBot {
@@ -37,7 +35,7 @@ impl Deref for TelegramBot {
 }
 
 impl TelegramBot {
-    pub fn new(config: TelegramBotConfig) -> Self {
+    pub fn new(config: TelegramBotConfig, dependency_paths: Arc<ProgramPathConfig>) -> Self {
         let bot = teloxide::Bot::new(&config.bot_token)
             .set_api_url(config.api_url.clone())
             .parse_mode(ParseMode::Html)
@@ -47,29 +45,24 @@ impl TelegramBot {
         Self {
             inner: bot,
             config: Arc::new(config),
+            dependency_paths,
         }
     }
 
-    pub fn init(config: TelegramBotConfig) {
-        _ = TELEGRAM_BOT.set(Self::new(config));
-    }
-
-    pub fn instance() -> &'static Self {
-        TELEGRAM_BOT.get().expect("Telegram bot not initialized")
-    }
-
-    pub fn bot() -> &'static teloxide::Bot {
-        Self::instance().inner().inner().inner()
+    pub fn bot(&self) -> &teloxide::Bot {
+        self.inner.inner().inner().inner()
     }
 
     #[inline]
-    pub fn max_payload_size() -> Size {
-        Self::instance().config.max_payload_size
+    #[must_use]
+    pub fn max_payload_size(&self) -> Size {
+        self.config.max_payload_size
     }
 
-    pub fn effective_max_filesize() -> Size {
-        let configured = Self::max_payload_size();
-        let platform = if Self::instance().config.is_api_url_local() {
+    #[must_use]
+    pub fn effective_max_filesize(&self) -> Size {
+        let configured = self.max_payload_size();
+        let platform = if self.config.is_api_url_local() {
             LOCAL_API_MAX_FILESIZE
         } else {
             OFFICIAL_API_MAX_FILESIZE
@@ -78,23 +71,23 @@ impl TelegramBot {
     }
 
     #[must_use]
-    pub fn owner_id() -> Option<teloxide::types::UserId> {
-        Self::instance()
-            .config
-            .owner_id
-            .map(teloxide::types::UserId)
+    pub fn owner_id(&self) -> Option<teloxide::types::UserId> {
+        self.config.owner_id.map(teloxide::types::UserId)
     }
 
-    pub fn owner_download_dir() -> Option<std::path::PathBuf> {
-        Self::instance().config.owner_download_dir.clone()
+    #[must_use]
+    pub fn owner_download_dir(&self) -> Option<std::path::PathBuf> {
+        self.config.owner_download_dir.clone()
     }
 }
 
 impl TelegramBot {
-    pub async fn run() -> anyhow::Result<()> {
+    pub async fn run(
+        bot: Arc<Self>,
+        rpc: Arc<crate::peering::rpc::RpcClient>,
+    ) -> anyhow::Result<()> {
         info!("Starting command bot...");
 
-        let bot = Self::instance();
         let me = bot.get_me().await?;
 
         bot.set_my_commands(BotCommand::bot_commands())
@@ -102,14 +95,14 @@ impl TelegramBot {
             .await
             .expect("Failed to set commands");
 
-        info!(api_url = ?Self::bot().api_url().as_str(), id = ?me.id, user = ?me.username(), name = ?me.full_name(), "Bot started");
+        info!(api_url = ?bot.bot().api_url().as_str(), id = ?me.id, user = ?me.username(), name = ?me.full_name(), "Bot started");
 
-        Box::pin(
-            Dispatcher::builder(&bot.inner, Update::filter_message().endpoint(answer))
-                .build()
-                .dispatch(),
-        )
-        .await;
+        let mut dispatcher =
+            Dispatcher::builder(bot.inner.clone(), Update::filter_message().endpoint(answer))
+                .dependencies(dptree::deps![bot, rpc])
+                .build();
+
+        Box::pin(dispatcher.dispatch()).await;
 
         Ok(())
     }
@@ -137,8 +130,12 @@ pub enum BotCommand {
     ListFixers,
 }
 
-#[tracing::instrument(name = "message", skip(_bot, msg), fields(chat = %msg.chat.id, msg_id = %msg.id, with = field::Empty))]
-async fn answer(_bot: &TeloxideBot, msg: Message) -> ResponseResult<()> {
+#[tracing::instrument(name = "message", skip(tg, rpc, msg), fields(chat = %msg.chat.id, msg_id = %msg.id, with = field::Empty))]
+async fn answer(
+    tg: Arc<TelegramBot>,
+    rpc: Arc<crate::peering::rpc::RpcClient>,
+    msg: Message,
+) -> ResponseResult<()> {
     trace!(?msg, "Got message");
 
     tokio::task::spawn(
@@ -167,7 +164,7 @@ async fn answer(_bot: &TeloxideBot, msg: Message) -> ResponseResult<()> {
                 }
             }
 
-            let bot_me = TelegramBot::instance().get_me().await?;
+            let bot_me = tg.get_me().await?;
 
             let msg_text = msg
                 .text()
@@ -176,8 +173,8 @@ async fn answer(_bot: &TeloxideBot, msg: Message) -> ResponseResult<()> {
                 .unwrap_or_default();
 
             match BotCommand::parse(&msg_text, bot_me.username()) {
-                Ok(c) => handlers::command::handle_command(&msg, c).await,
-                Err(_) => handlers::message::handle_message(&msg).await,
+                Ok(c) => handlers::command::handle_command(&tg, &rpc, &msg, c).await,
+                Err(_) => handlers::message::handle_message(&tg, &rpc, &msg).await,
             }
         }
         .in_current_span(),

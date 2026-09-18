@@ -110,7 +110,7 @@ export function formatExpiry(endsAt: string | null): string {
 
 export function formatTimeframe(ms: string): string {
   const n = Number(ms);
-  if (!Number.isFinite(n) || n <= 0) return "—";
+  if (!Number.isFinite(n) || n <= 0) return "\u2014";
   const s = n / 1000;
   if (s < 60) return `${s}s`;
   const m = s / 60;

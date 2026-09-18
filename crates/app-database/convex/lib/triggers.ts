@@ -7,7 +7,7 @@ const triggers = new Triggers<DataModel>();
 
 // Keep the requestCounts aggregate in sync with the `requests` table.
 // Fires on every ctx.db.insert/patch/replace/delete against the table,
-// including status transitions (e.g. pending → inProgress via `take`).
+// including status transitions (e.g. pending -> inProgress via `take`).
 // `patch` is surfaced as an `update` with both oldDoc and newDoc; the
 // aggregate's `replace` reconciles the namespace when status.Type changes.
 triggers.register(requestsId, async (ctx, change) => {

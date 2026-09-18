@@ -6,7 +6,7 @@ use tokio::process::Command;
 use tracing::{debug, warn};
 
 use crate::{
-    config::ActionsConfig,
+    ActionCtx,
     fixers::{
         FixRequest, FixResult, Fixer, FixerError, FixerReturn, common::crop_filter::CropFilter,
     },
@@ -18,10 +18,8 @@ pub struct CropImage;
 #[async_trait::async_trait]
 #[typetag::serde]
 impl Fixer for CropImage {
-    fn can_run(&self) -> bool {
-        ActionsConfig::dependency_paths()
-            .imagemagick_path()
-            .is_some()
+    async fn can_run(&self, ctx: &ActionCtx) -> bool {
+        ctx.dependency_paths.imagemagick_path().is_some()
     }
 
     fn description(&self) -> &'static str {
@@ -29,7 +27,7 @@ impl Fixer for CropImage {
          quite aggressively."
     }
 
-    async fn can_run_for(&self, request: &FixRequest) -> bool {
+    async fn can_run_for(&self, _ctx: &ActionCtx, request: &FixRequest) -> bool {
         let path = request.file_path.clone();
         tokio::task::spawn_blocking(move || file_type::infer_file_type(&path).ok())
             .await
@@ -38,7 +36,7 @@ impl Fixer for CropImage {
             .is_some_and(|x| x.type_() == file_type::mime::IMAGE)
     }
 
-    async fn run(&self, request: &FixRequest) -> FixerReturn {
+    async fn run(&self, ctx: &ActionCtx, request: &FixRequest) -> FixerReturn {
         debug!(path = ?request.file_path, "Auto cropping image");
 
         let input_file_path = &request.file_path;
@@ -54,13 +52,13 @@ impl Fixer for CropImage {
         };
 
         let crop_filter =
-            CropFilter::from_image_files(std::slice::from_ref(input_file_path)).await?;
+            CropFilter::from_image_files(ctx, std::slice::from_ref(input_file_path)).await?;
 
         debug!(?crop_filter, "Got crop filter");
 
         let mut cmd = {
             let mut cmd = Command::new(
-                ActionsConfig::dependency_paths()
+                ctx.dependency_paths
                     .imagemagick_path()
                     .expect("Imagemagick not found"),
             );

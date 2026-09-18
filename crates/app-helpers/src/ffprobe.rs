@@ -6,24 +6,31 @@ use std::{
     time,
 };
 
+use app_config::common::ProgramPathConfig;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
-use crate::config::HelpersConfig;
-
-pub fn ffprobe(path: impl AsRef<Path>) -> Result<FfProbeResult, FfProbeError> {
+pub fn ffprobe(
+    paths: &ProgramPathConfig,
+    path: impl AsRef<Path>,
+) -> Result<FfProbeResult, FfProbeError> {
     ffprobe_config(
+        paths,
         FfprobeConfig {
             count_frames: false,
         },
         path,
     )
 }
-pub async fn ffprobe_async<T>(path: T) -> Result<FfProbeResult, FfProbeError>
+pub async fn ffprobe_async<T>(
+    paths: &ProgramPathConfig,
+    path: T,
+) -> Result<FfProbeResult, FfProbeError>
 where
     T: AsRef<Path> + Send,
 {
     ffprobe_config_async(
+        paths,
         FfprobeConfig {
             count_frames: false,
         },
@@ -33,6 +40,7 @@ where
 }
 
 pub async fn ffprobe_config_async<T>(
+    paths: &ProgramPathConfig,
     config: FfprobeConfig,
     path: T,
 ) -> Result<FfProbeResult, FfProbeError>
@@ -41,7 +49,7 @@ where
 {
     let path = path.as_ref();
 
-    let ffprobe_path = HelpersConfig::dependency_paths().ffprobe_path();
+    let ffprobe_path = paths.ffprobe_path();
     let mut cmd = Command::new(ffprobe_path);
     {
         cmd.args(["-v", "quiet"])
@@ -67,12 +75,13 @@ where
 }
 
 pub fn ffprobe_config(
+    paths: &ProgramPathConfig,
     config: FfprobeConfig,
     path: impl AsRef<Path>,
 ) -> Result<FfProbeResult, FfProbeError> {
     let path = path.as_ref();
 
-    let ffprobe_path = HelpersConfig::dependency_paths().ffprobe_path();
+    let ffprobe_path = paths.ffprobe_path();
     let mut cmd = process::Command::new(ffprobe_path);
     {
         cmd.args(["-v", "quiet"])
@@ -97,23 +106,18 @@ pub fn ffprobe_config(
     serde_json::from_slice::<FfProbeResult>(&out.stdout).map_err(FfProbeError::Deserialize)
 }
 
-/// ffprobe configuration.
-///
-/// Use [`Config::builder`] for constructing a new config.
 #[derive(Clone, Copy, Debug)]
 pub struct FfprobeConfig {
     count_frames: bool,
 }
 
 impl FfprobeConfig {
-    /// Construct a new `ConfigBuilder`.
     #[must_use]
     pub const fn builder() -> ConfigBuilder {
         ConfigBuilder::new()
     }
 }
 
-/// Build the ffprobe configuration.
 pub struct ConfigBuilder {
     config: FfprobeConfig,
 }
@@ -137,15 +141,17 @@ impl ConfigBuilder {
         self
     }
 
-    /// Finalize the builder into a [`Config`].
     #[must_use]
     pub const fn build(self) -> FfprobeConfig {
         self.config
     }
 
-    /// Run ffprobe with the config produced by this builder.
-    pub fn run(self, path: impl AsRef<Path>) -> Result<FfProbeResult, FfProbeError> {
-        ffprobe_config(self.config, path)
+    pub fn run(
+        self,
+        paths: &ProgramPathConfig,
+        path: impl AsRef<Path>,
+    ) -> Result<FfProbeResult, FfProbeError> {
+        ffprobe_config(paths, self.config, path)
     }
 }
 
@@ -281,7 +287,6 @@ pub struct Format {
 }
 
 impl Format {
-    /// Get the duration parsed into a [`std::time::Duration`].
     #[must_use]
     pub fn try_get_duration(&self) -> Option<Result<time::Duration, num::ParseFloatError>> {
         self.duration

@@ -1,9 +1,13 @@
+use std::sync::Arc;
+
 use app_database::{Database, api::authed::AuthedInfoResponse, entity::authed::AuthedForRole};
 use app_peer_comms::{
     PeeringEndpoint,
     ticket::targeted::{TargetedTicket, TicketTarget},
 };
 use axum::{
+    Extension,
+    extract::State,
     http::{HeaderMap, StatusCode, header::CONTENT_TYPE},
     response::IntoResponse,
 };
@@ -11,8 +15,12 @@ use tracing::error;
 
 use crate::cmd::central::components::metrics;
 
-pub async fn get_join_ticket(headers: HeaderMap) -> impl IntoResponse {
-    let Some(info) = require_authed(&headers).await else {
+pub async fn get_join_ticket(
+    State(db): State<Arc<Database>>,
+    Extension(peering): Extension<Arc<PeeringEndpoint>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    let Some(info) = require_authed(&db, &headers).await else {
         return super::V1Response::err(
             StatusCode::UNAUTHORIZED,
             "Missing or invalid `Authorization: Bearer <api_key>` header",
@@ -26,8 +34,7 @@ pub async fn get_join_ticket(headers: HeaderMap) -> impl IntoResponse {
         AuthedInfoResponse::Authorized(info) => info,
     };
 
-    let pe = PeeringEndpoint::global();
-    let ticket = TargetedTicket::new(pe.join_ticket().await);
+    let ticket = TargetedTicket::new(peering.join_ticket().await);
     let target = match info.for_role {
         AuthedForRole::Worker => TicketTarget::Worker,
         AuthedForRole::Bot => TicketTarget::Bot,
@@ -39,8 +46,11 @@ pub async fn get_join_ticket(headers: HeaderMap) -> impl IntoResponse {
     }))
 }
 
-pub async fn get_connections(headers: HeaderMap) -> impl IntoResponse {
-    let Some(info) = require_authed(&headers).await else {
+pub async fn get_connections(
+    State(db): State<Arc<Database>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    let Some(info) = require_authed(&db, &headers).await else {
         return super::V1Response::err(
             StatusCode::UNAUTHORIZED,
             "Missing or invalid `Authorization: Bearer <api_key>` header",
@@ -50,7 +60,7 @@ pub async fn get_connections(headers: HeaderMap) -> impl IntoResponse {
         return super::V1Response::err(StatusCode::UNAUTHORIZED, error);
     }
 
-    match Database::global().connections_list().await {
+    match db.connections_list().await {
         Ok(rows) => super::V1Response::ok(serde_json::json!({
             "connections": rows,
         })),
@@ -77,12 +87,9 @@ pub async fn get_health() -> impl IntoResponse {
     StatusCode::OK
 }
 
-async fn require_authed(headers: &HeaderMap) -> Option<AuthedInfoResponse> {
+async fn require_authed(db: &Database, headers: &HeaderMap) -> Option<AuthedInfoResponse> {
     let token = extract_bearer(headers)?;
-    match Database::global()
-        .authed_get_info_by_token(token.into())
-        .await
-    {
+    match db.authed_get_info_by_token(token.into()).await {
         Ok(info) => Some(info),
         Err(e) => {
             error!(?e, "Failed to get authed info");

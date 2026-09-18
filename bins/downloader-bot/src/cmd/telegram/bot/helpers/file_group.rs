@@ -18,6 +18,7 @@ type MediaGroup = (Vec<InputMedia>, Vec<PathBuf>);
 
 #[tracing::instrument(skip_all)]
 pub async fn files_to_input_media_groups<TFiles, TFile>(
+    dependency_paths: Arc<app_config::common::ProgramPathConfig>,
     files: TFiles,
     max_size: Size,
 ) -> (Vec<MediaGroup>, Vec<(PathBuf, String)>)
@@ -26,15 +27,15 @@ where
     TFile: AsRef<Path>,
 {
     trace!(?files, "Getting file infos");
-    let (file_info, mut failed) = infos_from_files(files).await;
+    let (file_info, mut failed) = infos_from_files(dependency_paths, files).await;
     trace!(?file_info, "Got file infos");
 
     trace!("Converting to media files");
     let media_files = file_info.into_iter().map(|file_info| {
         let input_file = InputFile::file(file_info.path.clone());
 
-        // Handle the GIFs as animations because Telegram
-        // Also handle PNGs as documents to prevent Telegram from converting them to jpgs
+        // Send GIFs and PNGs as documents: Telegram plays GIF documents as
+        // animations, and converts PNG photos to JPGs.
         // Optional todo: Also handle silent videos as animations
         if file_info
             .mime
@@ -196,7 +197,10 @@ fn chunk(
     (res, failed)
 }
 
-async fn infos_from_files<TFiles, TFile>(files: TFiles) -> (Vec<FileInfo>, Vec<(PathBuf, String)>)
+async fn infos_from_files<TFiles, TFile>(
+    dependency_paths: Arc<app_config::common::ProgramPathConfig>,
+    files: TFiles,
+) -> (Vec<FileInfo>, Vec<(PathBuf, String)>)
 where
     TFiles: IntoIterator<Item = TFile>,
     TFile: AsRef<Path>,
@@ -208,6 +212,7 @@ where
         .map(|x| x.as_ref().to_path_buf())
         .map(|file_path| {
             let failed = failed.clone();
+            let dependency_paths = dependency_paths.clone();
 
             async move {
                 let mime = {
@@ -236,7 +241,9 @@ where
                 let dimensions = if let Some(mime) = &mime
                     && mime.type_() == "image"
                 {
-                    let info = app_helpers::ffprobe::ffprobe_async(&file_path).await.ok()?;
+                    let info = app_helpers::ffprobe::ffprobe_async(&dependency_paths, &file_path)
+                        .await
+                        .ok()?;
                     let stream = info.streams.first()?;
 
                     match (stream.width, stream.height) {

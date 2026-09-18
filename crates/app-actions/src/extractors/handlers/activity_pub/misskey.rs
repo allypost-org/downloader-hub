@@ -6,7 +6,10 @@ use tracing::{debug, trace};
 use url::Url;
 
 use super::{APHandler, HandleResult, node_info::NodeInfo};
-use crate::extractors::{ExtractedUrlInfo, handlers::twitter::Twitter};
+use crate::{
+    ActionCtx,
+    extractors::{ExtractedUrlInfo, handlers::twitter::Twitter},
+};
 
 #[derive(Debug)]
 pub struct MisskeyHandler;
@@ -20,8 +23,13 @@ impl APHandler for MisskeyHandler {
         )
     }
 
-    #[tracing::instrument]
-    async fn handle(&self, info: &NodeInfo, url: &str) -> Result<HandleResult, String> {
+    #[tracing::instrument(skip(ctx))]
+    async fn handle(
+        &self,
+        ctx: &ActionCtx,
+        info: &NodeInfo,
+        url: &str,
+    ) -> Result<HandleResult, String> {
         let url = Url::parse(url).map_err(|e| e.to_string())?;
 
         let post_id = url
@@ -41,7 +49,7 @@ impl APHandler for MisskeyHandler {
             .map(|x| x.to_string().into())
             .collect::<Vec<ExtractedUrlInfo>>();
 
-        urls.push(Twitter.screenshot_tweet_url_info(&url));
+        urls.push(Twitter.screenshot_tweet_url_info(ctx, &url));
 
         Ok(HandleResult::Handled(urls))
     }

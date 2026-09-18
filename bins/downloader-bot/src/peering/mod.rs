@@ -1,7 +1,4 @@
-use std::{
-    sync::{Arc, OnceLock},
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
 use app_config::common::{
     PeerCommsBotConfig, PeerCommsBotTicketConfig, PeerCommsBotTicketFromApiConfig,
@@ -17,17 +14,15 @@ use app_peer_comms::{
 };
 use tracing::{debug, error, trace, warn};
 
-use crate::peering::{reconnect::set_connect_config, rpc::RpcClient};
+use crate::peering::rpc::RpcClient;
 
 pub mod reconnect;
 pub mod rpc;
 
-static HEARTBEAT: OnceLock<()> = OnceLock::new();
-
 pub async fn init_peering_endpoint(
     config: PeerCommsBotConfig,
     capabilities: Capabilities,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<Arc<RpcClient>, Box<dyn std::error::Error + Send + Sync>> {
     let ticket = run_retried(
         "Get ticket",
         Box::new({
@@ -69,52 +64,56 @@ pub async fn init_peering_endpoint(
         .build()
         .await?;
 
-    PeeringEndpoint::init(pe)?;
+    let peering = Arc::new(pe);
 
-    set_connect_config(config.ticket.api.clone());
-
-    if let Err(e) = RpcClient::init(config.ticket.api.key.clone(), central_addr, capabilities).await
+    let rpc = match RpcClient::connect(
+        peering,
+        config.ticket.api.clone(),
+        central_addr,
+        capabilities,
+    )
+    .await
     {
-        error!(target: PeeringEndpoint::trace_span_name(), ?e, "Failed to authenticate irpc session");
-        return Err(e);
-    }
+        Ok(rpc) => rpc,
+        Err(e) => {
+            error!(target: PeeringEndpoint::trace_span_name(), ?e, "Failed to authenticate irpc session");
+            return Err(e);
+        }
+    };
 
-    HEARTBEAT.get_or_init(|| {
-        tokio::spawn(async {
-            loop {
-                let jitter = rand::random_range(0..5_000u64);
-                tokio::time::sleep(Duration::from_millis(30_000 + jitter)).await;
-                if let Err(e) = RpcClient::heartbeat().await {
-                    debug!(?e, "heartbeat failed");
-                    if let Err(re) = reconnect().await {
-                        warn!(?re, "reconnect failed after heartbeat failure");
-                    }
-                    continue;
-                }
-                match RpcClient::get_log_settings().await {
-                    Ok(app_peer_comms::rpc::request::LogSettingsResult::Ok(settings)) => {
-                        let settings = app_logger::LogFilterSettings {
-                            console: settings.console,
-                            file: settings.file,
-                        };
-                        if let Err(e) = app_logger::apply_log_filter_settings(&settings) {
-                            warn!(?e, "Failed to apply dynamic log settings");
-                        }
-                    }
-                    Ok(result) => debug!(?result, "central did not return log settings"),
-                    Err(e) => debug!(?e, "log settings request failed"),
-                }
-            }
-        });
-    });
+    spawn_heartbeat(rpc.clone());
 
-    Ok(())
+    Ok(rpc)
 }
 
-/// Re-export the single-flight reconnect coordinator so existing
-/// `crate::peering::reconnect()` call sites keep working while now coalescing
-/// concurrent reconnects across all request tasks and the heartbeat.
-pub use reconnect::reconnect;
+fn spawn_heartbeat(rpc: Arc<RpcClient>) {
+    tokio::spawn(async move {
+        loop {
+            let jitter = rand::random_range(0..5_000u64);
+            tokio::time::sleep(Duration::from_millis(30_000 + jitter)).await;
+            if let Err(e) = rpc.heartbeat().await {
+                debug!(?e, "heartbeat failed");
+                if let Err(re) = rpc.reconnect().await {
+                    warn!(?re, "reconnect failed after heartbeat failure");
+                }
+                continue;
+            }
+            match rpc.get_log_settings().await {
+                Ok(app_peer_comms::rpc::request::LogSettingsResult::Ok(settings)) => {
+                    let settings = app_logger::LogFilterSettings {
+                        console: settings.console,
+                        file: settings.file,
+                    };
+                    if let Err(e) = app_logger::apply_log_filter_settings(&settings) {
+                        warn!(?e, "Failed to apply dynamic log settings");
+                    }
+                }
+                Ok(result) => debug!(?result, "central did not return log settings"),
+                Err(e) => debug!(?e, "log settings request failed"),
+            }
+        }
+    });
+}
 
 async fn get_ticket(
     config: PeerCommsBotTicketConfig,

@@ -3,16 +3,10 @@ use std::collections::HashSet;
 use serde_json::Value;
 
 pub struct TreeYielder {
-    /// A function/closure that determines if a value should be yielded.
-    /// Corresponds to `yieldValue` in the Python code.
     yield_value: Box<dyn Fn(&Value) -> bool>,
 }
 
 impl TreeYielder {
-    /// Creates a new `TreeYielder`.
-    ///
-    /// `yield_value` should be a lambda/function that takes a reference to a value
-    /// and returns `true`/`false`.
     pub fn new<F>(yield_value: F) -> Self
     where
         F: Fn(&Value) -> bool + 'static,
@@ -22,22 +16,14 @@ impl TreeYielder {
         }
     }
 
-    /// Traverses the JSON Value tree looking for subValues that meet the
-    /// criteria defined by `yield_value`.
+    /// Returns every value in the tree for which `yield_value` returns `true`.
     ///
-    /// `memo` is handled internally using pointers to the heap data
-    /// to prevent cycles (though standard JSON is acyclic, this preserves
-    /// the logic of the original Python class).
+    /// Traversal tracks visited nodes by pointer address, so cyclic structures cannot
+    /// cause infinite recursion.
     #[must_use]
     pub fn find_all<'a>(&'a self, obj: &'a Value) -> Vec<&'a Value> {
         let mut results = Vec::new();
-        // In Python, `id()` is used. Here we use the raw memory address of the Value.
         let mut memo: HashSet<*const Value> = HashSet::new();
-
-        // Python's `stackVals` tracked the path for `currentLevel`.
-        // In Rust, we can pass path context down if needed, but strictly
-        // for yielding values, it isn't required.
-        // We skip the explicit path stack to keep the Rust idiomatic.
 
         self.find_all_values(obj, &mut results, &mut memo);
         results
@@ -95,46 +81,31 @@ impl TreeYielder {
 
         // Check memo to prevent infinite recursion in cyclic graphs
         if !memo.insert(node_id) {
-            // Corresponds to: `if id(obj) in self.memo: return`
             return;
         }
 
-        // Check if this node matches the yield condition
         if (self.yield_value)(node) {
             results.push(node);
         }
 
         match node {
-            // Handles non-iterables: Null, Bool, Number, String
-            // Corresponds to: `if isinstance(obj, self.nonIterables) or obj is None: pass`
-            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
-                // Do nothing
-            }
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
 
-            // Handles dictionaries (Objects in JSON)
-            // Corresponds to: `elif isinstance(obj, dict):`
             Value::Object(map) => {
                 for (_key, val) in map {
-                    // In Python, stackVals logic goes here.
                     self.find_all_values(val, results, memo);
-                    // Python pops stackVals here.
                 }
             }
 
-            // Handles lists and tuples (Arrays in JSON)
-            // Corresponds to: `elif isinstance(obj, (list, tuple)):`
             Value::Array(arr) => {
                 for val in arr {
-                    // In Python, stackVals logic goes here.
                     self.find_all_values(val, results, memo);
-                    // Python pops stackVals here.
                 }
             }
         }
     }
 }
 
-// Example Usage
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -143,7 +114,6 @@ mod tests {
 
     #[test]
     fn test_tree_yielder_find_all() {
-        // Create a nested JSON object
         let data = json!({
             "name": "Root",
             "value": 100,
@@ -154,15 +124,13 @@ mod tests {
             }
         });
 
-        // Find all string values
         let yielder = TreeYielder::new(serde_json::Value::is_string);
         let strings = yielder.find_all(&data);
 
         assert_eq!(strings.len(), 2);
-        assert!(strings.contains(&&json!("Root"))); // Comparing &Value to &str works via serde_json partial eq
+        assert!(strings.contains(&&json!("Root")));
         assert!(strings.contains(&&json!("Child")));
 
-        // Find all integers (strictly checking is_number, though JSON numbers are floats)
         let yielder = TreeYielder::new(serde_json::Value::is_i64);
         let numbers = yielder.find_all(&data);
 

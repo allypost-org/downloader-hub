@@ -12,8 +12,12 @@ use serenity::{
 use tracing::{debug, info, trace, warn};
 
 use crate::{
-    cmd::discord::broadcaster::{Broadcast, BroadcastData, MessageBroadcaster},
+    cmd::discord::{
+        bot::discord_bot::{DiscordBot, DiscordBotKey},
+        broadcaster::{Broadcast, BroadcastData, MessageBroadcaster},
+    },
     config::Config,
+    peering::rpc::RpcClient,
 };
 
 pub mod discord_bot;
@@ -23,10 +27,14 @@ pub mod helpers;
 pub struct Handler {
     is_loop_running: AtomicBool,
     about_text: String,
+    broadcaster: MessageBroadcaster,
+    rpc: Arc<RpcClient>,
 }
 
 pub struct HandlerConfig {
     pub about_text: String,
+    pub broadcaster: MessageBroadcaster,
+    pub rpc: Arc<RpcClient>,
 }
 
 impl Handler {
@@ -34,7 +42,18 @@ impl Handler {
         Self {
             is_loop_running: AtomicBool::new(false),
             about_text: config.about_text,
+            broadcaster: config.broadcaster,
+            rpc: config.rpc,
         }
+    }
+
+    async fn discord_bot(ctx: &Context) -> Arc<DiscordBot> {
+        ctx.data
+            .read()
+            .await
+            .get::<DiscordBotKey>()
+            .cloned()
+            .expect("DiscordBot present in TypeMap")
     }
 }
 
@@ -109,12 +128,15 @@ impl EventHandler for Handler {
         }
 
         let ctx = Arc::new(ctx);
+        let broadcaster = self.broadcaster.clone();
+        let rpc = Arc::clone(&self.rpc);
+        let bot = Self::discord_bot(&ctx).await;
 
         tokio::task::spawn(async move {
             // One-shot startup scan: recover in-progress/delivering requests as
             // supervised per-request watchers. Per-request watches own their
             // own lifecycles now; there is no persistent snapshot loop.
-            if let Err(e) = handlers::work_request::startup_scan().await {
+            if let Err(e) = handlers::work_request::startup_scan(&rpc, &bot).await {
                 warn!(?e, "Startup scan exited with error; giving up");
             }
         });
@@ -123,7 +145,7 @@ impl EventHandler for Handler {
             async move {
                 loop {
                     debug!("Starting to watch message broadcaster");
-                    let mut broadcast_iter = MessageBroadcaster::get().recv();
+                    let mut broadcast_iter = broadcaster.recv();
                     while let Ok(broadcast) = broadcast_iter.recv().await {
                         let Err(broadcast_err) =
                             handle_broadcast(broadcast.clone(), ctx.clone()).await
@@ -139,17 +161,18 @@ impl EventHandler for Handler {
                         }
 
                         warn!(?broadcast, ?broadcast_err, "Failed to handle broadcast");
+                        let broadcaster = broadcaster.clone();
                         tokio::task::spawn(async move {
                             let delay = 1000 + rand::random_range(0..=1000);
                             let delay = std::time::Duration::from_millis(delay);
                             debug!(?broadcast, ?delay, "Repeating broadcast after delay");
                             tokio::time::sleep(delay).await;
                             trace!(?broadcast, "Sending broadcast");
-                            MessageBroadcaster::send(broadcast);
+                            broadcaster.send_message(broadcast);
                         });
                     }
 
-                    let about_two_seconds = 2000 + rand::random_range(0..=2000);
+                    let about_two_seconds = 2000 + rand::random_range(0..2000);
                     let about_two_seconds = std::time::Duration::from_millis(about_two_seconds);
 
                     debug!(time = ?about_two_seconds, "Message broadcaster stream finished. Sleeping for a random amount of time...");
@@ -203,11 +226,13 @@ impl EventHandler for Handler {
             Err(e) => {
                 if !urls.is_empty() {
                     trace!("Parse failed but message has URLs, treating as free-form download");
-                    handlers::message::handle_download_request(&ctx, &msg, urls).await;
+                    let bot = Self::discord_bot(&ctx).await;
+                    handlers::message::handle_download_request(&ctx, &msg, &bot, &self.rpc, urls)
+                        .await;
                     return;
                 }
 
-                MessageBroadcaster::send(Broadcast::from_data((
+                self.broadcaster.send_message(Broadcast::from_data((
                     msg.channel_id,
                     CreateMessage::new().content(format!("```\n{}\n```", e)),
                 )));
@@ -224,7 +249,15 @@ impl EventHandler for Handler {
             }
             BotCommand::DownloadAndFix { urls: cmd_urls } => {
                 let combined_urls = if cmd_urls.is_empty() { urls } else { cmd_urls };
-                handlers::message::handle_download_request(&ctx, &msg, combined_urls).await;
+                let bot = Self::discord_bot(&ctx).await;
+                handlers::message::handle_download_request(
+                    &ctx,
+                    &msg,
+                    &bot,
+                    &self.rpc,
+                    combined_urls,
+                )
+                .await;
             }
             BotCommand::ListExtractors | BotCommand::ListDownloaders | BotCommand::ListFixers => {
                 use crate::cmd::_common::capabilities::{CapabilityKind, fetch, render};
@@ -233,7 +266,7 @@ impl EventHandler for Handler {
                     BotCommand::ListDownloaders => CapabilityKind::Downloaders,
                     _ => CapabilityKind::Fixers,
                 };
-                let text = fetch().await.map_or_else(
+                let text = fetch(self.rpc.as_ref()).await.map_or_else(
                     || "Failed to fetch capabilities from central.".to_string(),
                     |summary| render(kind, &summary),
                 );

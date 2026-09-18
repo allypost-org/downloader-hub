@@ -112,10 +112,8 @@ impl Default for LogOptions {
     }
 }
 
-/// Initialize the logger
-///
 /// # Panics
-/// Panics if the logger fails to initialize
+/// Panics if the logger was already initialized or a global subscriber is already set
 pub fn init() {
     init_with_options(LogOptions::default());
 }

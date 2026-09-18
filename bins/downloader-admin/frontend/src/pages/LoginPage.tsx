@@ -30,7 +30,7 @@ export function LoginPage() {
     <div className="flex min-h-screen items-center justify-center p-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>Downloader Hub — Admin</CardTitle>
+          <CardTitle>Downloader Hub &mdash; Admin</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={onSubmit} className="space-y-4">
@@ -49,7 +49,7 @@ export function LoginPage() {
               <p className="text-sm text-destructive">{error}</p>
             )}
             <Button type="submit" className="w-full" disabled={busy}>
-              {busy ? "Signing in…" : "Sign in"}
+              {busy ? "Signing in\u2026" : "Sign in"}
             </Button>
           </form>
         </CardContent>

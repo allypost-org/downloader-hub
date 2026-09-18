@@ -46,13 +46,11 @@ const HTTP_VALUE: &AsciiSet = &CONTROLS
 /// - The OPTIONAL language information (`language_tag`).
 /// - A character sequence representing the actual value (`value`), separated by single quotes.
 ///
-/// It is defined in [RFC 5987 §3.2](https://datatracker.ietf.org/doc/html/rfc5987#section-3.2).
+/// It is defined in [RFC 5987 section 3.2](https://datatracker.ietf.org/doc/html/rfc5987#section-3.2).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExtendedValue {
-    /// The character set that is used to encode the `value` to a string.
     pub charset: Charset,
 
-    /// The human language details of the `value`, if available.
     pub language_tag: Option<LanguageTag>,
 
     /// The parameter value, as expressed in octets.
@@ -147,20 +145,20 @@ pub enum DispositionParam {
     Filename(String),
 
     /// An extended file name. It must not exist for `ContentType::Formdata` according to
-    /// [RFC 7578 §4.2](https://datatracker.ietf.org/doc/html/rfc7578#section-4.2).
+    /// [RFC 7578 section 4.2](https://datatracker.ietf.org/doc/html/rfc7578#section-4.2).
     FilenameExt(ExtendedValue),
 
     /// An unrecognized regular parameter as defined in
-    /// [RFC 5987 §3.2.1](https://datatracker.ietf.org/doc/html/rfc5987#section-3.2.1) as
+    /// [RFC 5987 section 3.2.1](https://datatracker.ietf.org/doc/html/rfc5987#section-3.2.1) as
     /// `reg-parameter`, in
-    /// [RFC 6266 §4.1](https://datatracker.ietf.org/doc/html/rfc6266#section-4.1) as
+    /// [RFC 6266 section 4.1](https://datatracker.ietf.org/doc/html/rfc6266#section-4.1) as
     /// `token "=" value`. Recipients should ignore unrecognizable parameters.
     Unknown(String, String),
 
     /// An unrecognized extended parameter as defined in
-    /// [RFC 5987 §3.2.1](https://datatracker.ietf.org/doc/html/rfc5987#section-3.2.1) as
+    /// [RFC 5987 section 3.2.1](https://datatracker.ietf.org/doc/html/rfc5987#section-3.2.1) as
     /// `ext-parameter`, in
-    /// [RFC 6266 §4.1](https://datatracker.ietf.org/doc/html/rfc6266#section-4.1) as
+    /// [RFC 6266 section 4.1](https://datatracker.ietf.org/doc/html/rfc6266#section-4.1) as
     /// `ext-token "=" ext-value`. The single trailing asterisk is not included. Recipients should
     /// ignore unrecognizable parameters.
     UnknownExt(String, ExtendedValue),
@@ -168,42 +166,34 @@ pub enum DispositionParam {
 
 #[allow(dead_code)]
 impl DispositionParam {
-    /// Returns `true` if the parameter is [`Name`](DispositionParam::Name).
     #[inline]
     #[must_use]
     pub const fn is_name(&self) -> bool {
         self.as_name().is_some()
     }
 
-    /// Returns `true` if the parameter is [`Filename`](DispositionParam::Filename).
     #[inline]
     #[must_use]
     pub const fn is_filename(&self) -> bool {
         self.as_filename().is_some()
     }
 
-    /// Returns `true` if the parameter is [`FilenameExt`](DispositionParam::FilenameExt).
     #[inline]
     #[must_use]
     pub const fn is_filename_ext(&self) -> bool {
         self.as_filename_ext().is_some()
     }
 
-    /// Returns `true` if the parameter is [`Unknown`](DispositionParam::Unknown) and the `name`
     #[inline]
-    /// matches.
     pub fn is_unknown<T: AsRef<str>>(&self, name: T) -> bool {
         self.as_unknown(name).is_some()
     }
 
-    /// Returns `true` if the parameter is [`UnknownExt`](DispositionParam::UnknownExt) and the
-    /// `name` matches.
     #[inline]
     pub fn is_unknown_ext<T: AsRef<str>>(&self, name: T) -> bool {
         self.as_unknown_ext(name).is_some()
     }
 
-    /// Returns the name if applicable.
     #[inline]
     #[must_use]
     pub const fn as_name(&self) -> Option<&str> {
@@ -223,7 +213,6 @@ impl DispositionParam {
         }
     }
 
-    /// Returns the filename* if applicable.
     #[inline]
     #[must_use]
     pub const fn as_filename_ext(&self) -> Option<&ExtendedValue> {
@@ -233,8 +222,6 @@ impl DispositionParam {
         }
     }
 
-    /// Returns the value of the unrecognized regular parameter if it is
-    /// [`Unknown`](DispositionParam::Unknown) and the `name` matches.
     #[inline]
     pub fn as_unknown<T: AsRef<str>>(&self, name: T) -> Option<&str> {
         match self {
@@ -246,7 +233,7 @@ impl DispositionParam {
     }
 
     /// Returns the value of the unrecognized extended parameter if it is
-    /// [`Unknown`](DispositionParam::Unknown) and the `name` matches.
+    /// [`UnknownExt`](DispositionParam::UnknownExt) and the `name` matches.
     #[inline]
     pub fn as_unknown_ext<T: AsRef<str>>(&self, name: T) -> Option<&ExtendedValue> {
         match self {
@@ -293,26 +280,14 @@ pub fn parse_extended_value(val: &str) -> anyhow::Result<ExtendedValue> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContentDisposition {
-    /// The disposition type
     pub disposition: DispositionType,
 
-    /// Disposition parameters
     pub parameters: Vec<DispositionParam>,
 }
 
 #[allow(dead_code)]
 impl ContentDisposition {
     /// Constructs a Content-Disposition header suitable for downloads.
-    ///
-    /// # Examples
-    /// ```
-    /// use actix_web::http::header::{ContentDisposition, TryIntoHeaderValue as _};
-    ///
-    /// let cd = ContentDisposition::attachment("files.zip");
-    ///
-    /// let cd_val = cd.try_into_value().unwrap();
-    /// assert_eq!(cd_val, "attachment; filename=\"files.zip\"");
-    /// ```
     pub fn attachment(filename: impl Into<String>) -> Self {
         Self {
             disposition: DispositionType::Attachment,
@@ -343,7 +318,6 @@ impl ContentDisposition {
             }
             left = new_left;
             if let Some(param_name) = param_name.strip_suffix('*') {
-                // extended parameters
                 let (ext_value, new_left) = split_once_and_trim(left, ';');
                 left = new_left;
                 let ext_value = parse_extended_value(ext_value)?;
@@ -355,13 +329,11 @@ impl ContentDisposition {
                 };
                 cd.parameters.push(param);
             } else {
-                // regular parameters
                 let value = if left.starts_with('\"') {
                     // quoted-string: defined in RFC 6266 -> RFC 2616 Section 3.6
                     let mut escaping = false;
                     let mut quoted_string = vec![];
                     let mut end = None;
-                    // search for closing quote
                     for (i, &c) in left.as_bytes().iter().skip(1).enumerate() {
                         if escaping {
                             escaping = false;
@@ -395,7 +367,6 @@ impl ContentDisposition {
                 let param = if param_name.eq_ignore_ascii_case("name") {
                     DispositionParam::Name(value)
                 } else if param_name.eq_ignore_ascii_case("filename") {
-                    // See also comments in test_from_raw_unnecessary_percent_decode.
                     DispositionParam::Filename(value)
                 } else {
                     DispositionParam::Unknown(param_name.to_owned(), value)
@@ -407,25 +378,21 @@ impl ContentDisposition {
         Ok(cd)
     }
 
-    /// Returns `true` if type is [`Inline`](DispositionType::Inline).
     #[must_use]
     pub const fn is_inline(&self) -> bool {
         matches!(self.disposition, DispositionType::Inline)
     }
 
-    /// Returns `true` if type is [`Attachment`](DispositionType::Attachment).
     #[must_use]
     pub const fn is_attachment(&self) -> bool {
         matches!(self.disposition, DispositionType::Attachment)
     }
 
-    /// Returns `true` if type is [`FormData`](DispositionType::FormData).
     #[must_use]
     pub const fn is_form_data(&self) -> bool {
         matches!(self.disposition, DispositionType::FormData)
     }
 
-    /// Returns `true` if type is [`Ext`](DispositionType::Ext) and the `disp_type` matches.
     pub fn is_ext(&self, disp_type: impl AsRef<str>) -> bool {
         matches!(
             self.disposition,
@@ -433,32 +400,27 @@ impl ContentDisposition {
         )
     }
 
-    /// Return the value of *name* if exists.
     pub fn get_name(&self) -> Option<&str> {
         self.parameters.iter().find_map(DispositionParam::as_name)
     }
 
-    /// Return the value of *filename* if exists.
     pub fn get_filename(&self) -> Option<&str> {
         self.parameters
             .iter()
             .find_map(DispositionParam::as_filename)
     }
 
-    /// Return the value of *filename\** if exists.
     pub fn get_filename_ext(&self) -> Option<&ExtendedValue> {
         self.parameters
             .iter()
             .find_map(DispositionParam::as_filename_ext)
     }
 
-    /// Return the value of the parameter which the `name` matches.
     pub fn get_unknown(&self, name: impl AsRef<str>) -> Option<&str> {
         let name = name.as_ref();
         self.parameters.iter().find_map(|p| p.as_unknown(name))
     }
 
-    /// Return the value of the extended parameter which the `name` matches.
     pub fn get_unknown_ext(&self, name: impl AsRef<str>) -> Option<&ExtendedValue> {
         let name = name.as_ref();
         self.parameters.iter().find_map(|p| p.as_unknown_ext(name))
@@ -481,7 +443,7 @@ impl fmt::Display for DispositionParam {
         // All ASCII control characters (0-30, 127) including horizontal tab, double quote, and
         // backslash should be escaped in quoted-string (i.e. "foobar").
         //
-        // Ref: RFC 6266 §4.1 -> RFC 2616 §3.6
+        // Ref: RFC 6266 section 4.1 -> RFC 2616 section 3.6
         //
         // filename-parm  = "filename" "=" value
         // value          = token | quoted-string
@@ -509,9 +471,6 @@ impl fmt::Display for DispositionParam {
         //               "/" / "[" / "]" / "?" / "="
         //               ; Must be in quoted-string,
         //               ; to use within parameter values
-        //
-        //
-        // See also comments in test_from_raw_unnecessary_percent_decode.
 
         static RE: LazyLock<Regex> = LazyLock::new(|| {
             Regex::new("[\x00-\x08\x10-\x1F\x7F\"\\\\]").expect("Regex shouldn't fail")

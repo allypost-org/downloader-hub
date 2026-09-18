@@ -35,7 +35,7 @@ export function DataTable<TData, TValue>({
   columns,
   data,
   search = true,
-  searchPlaceholder = "Search…",
+  searchPlaceholder = "Search\u2026",
   onRowClick,
   emptyMessage = "No results.",
 }: DataTableProps<TData, TValue>) {
@@ -94,10 +94,10 @@ export function DataTable<TData, TValue>({
                         {canSort && (
                           <span className="text-xs text-muted-foreground">
                             {sorted === "asc"
-                              ? "▲"
+                              ? "\u25b2"
                               : sorted === "desc"
-                                ? "▼"
-                                : "↕"}
+                                ? "\u25bc"
+                                : "\u2195"}
                           </span>
                         )}
                       </span>

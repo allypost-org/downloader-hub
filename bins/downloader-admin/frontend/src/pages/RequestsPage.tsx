@@ -192,7 +192,7 @@ export function RequestsPage() {
   }
 
   function authedLabel(id: string | undefined): string {
-    if (!id) return "—";
+    if (!id) return "\u2014";
     const n = authedName(id);
     return n ? `${n} (${id.slice(-6)})` : id.slice(-12);
   }
@@ -316,7 +316,7 @@ export function RequestsPage() {
           </CardHeader>
           <CardContent>
             {list.isLoading ? (
-              <p className="text-muted-foreground">Loading…</p>
+              <p className="text-muted-foreground">Loading&hellip;</p>
             ) : (
               <>
                 <DataTable
@@ -332,7 +332,7 @@ export function RequestsPage() {
                 <div className="mt-3 flex justify-center">
                   {list.isFetchingNextPage ? (
                     <span className="text-xs text-muted-foreground">
-                      Loading more…
+                      Loading more&hellip;
                     </span>
                   ) : list.hasNextPage ? (
                     <Button size="sm" variant="outline" onClick={loadMore}>

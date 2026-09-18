@@ -7,7 +7,7 @@ use tracing::{debug, trace};
 use url::Url;
 
 use super::{ExtractInfoRequest, ExtractedInfo, Extractor};
-use crate::{config::ActionsConfig, downloaders::handlers::generic::Generic};
+use crate::{ActionCtx, downloaders::handlers::generic::Generic};
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Tiktok;
@@ -23,8 +23,12 @@ impl Extractor for Tiktok {
         Self::is_post_url(&request.url)
     }
 
-    async fn extract_info(&self, request: &ExtractInfoRequest) -> Result<ExtractedInfo, String> {
-        let media_urls = get_media_download_urls(request)
+    async fn extract_info(
+        &self,
+        ctx: &ActionCtx,
+        request: &ExtractInfoRequest,
+    ) -> Result<ExtractedInfo, String> {
+        let media_urls = get_media_download_urls(ctx, request)
             .await
             .map_err(|e| format!("Failed to get media download urls for tiktok post: {:?}", e))?;
 
@@ -50,14 +54,17 @@ struct TiktokPage {
 static ITEM_ID_MATCH: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"/(?:photo|video)/(?P<item_id>\d+)").expect("Invalid regex"));
 
-async fn get_media_download_urls(req: &ExtractInfoRequest) -> Result<Vec<UrlWithMeta>, String> {
+async fn get_media_download_urls(
+    ctx: &ActionCtx,
+    req: &ExtractInfoRequest,
+) -> Result<Vec<UrlWithMeta>, String> {
     debug!("Getting media download urls for tiktok post");
 
-    let page = fetch_page(req).await?;
+    let page = fetch_page(ctx, req).await?;
     trace!(?page.final_url, "Fetched tiktok page");
 
     if let Ok(media_urls) =
-        media_urls_from_post_data(&page.post_data, &page.final_url, &page.cookies)
+        media_urls_from_post_data(ctx, &page.post_data, &page.final_url, &page.cookies)
     {
         return Ok(media_urls);
     }
@@ -67,17 +74,18 @@ async fn get_media_download_urls(req: &ExtractInfoRequest) -> Result<Vec<UrlWith
         "Primary tiktok extraction failed, trying video-page fallback"
     );
     let fallback_url = video_page_fallback_url(&page.final_url)?;
-    let fallback_page = fetch_page_at(&fallback_url, req, &page.cookies).await?;
+    let fallback_page = fetch_page_at(ctx, &fallback_url, req, &page.cookies).await?;
     media_urls_from_post_data(
+        ctx,
         &fallback_page.post_data,
         &fallback_page.final_url,
         &fallback_page.cookies,
     )
 }
 
-async fn fetch_page(req: &ExtractInfoRequest) -> Result<TiktokPage, String> {
+async fn fetch_page(ctx: &ActionCtx, req: &ExtractInfoRequest) -> Result<TiktokPage, String> {
     let resp = req
-        .as_request_builder()?
+        .as_request_builder(ctx)?
         .send()
         .await
         .map_err(|e| format!("Failed to send request to tiktok: {:?}", e))?;
@@ -85,6 +93,7 @@ async fn fetch_page(req: &ExtractInfoRequest) -> Result<TiktokPage, String> {
 }
 
 async fn fetch_page_at(
+    ctx: &ActionCtx,
     url: &Url,
     req: &ExtractInfoRequest,
     cookies: &HashMap<String, String>,
@@ -94,10 +103,7 @@ async fn fetch_page_at(
         .get(url.as_str());
 
     if !req.headers.contains_key(http::header::USER_AGENT) {
-        builder = builder.header(
-            http::header::USER_AGENT,
-            ActionsConfig::request().user_agent.as_str(),
-        );
+        builder = builder.header(http::header::USER_AGENT, ctx.request.user_agent.as_str());
     }
 
     for (k, v) in &req.headers {
@@ -193,6 +199,7 @@ fn parse_post_data_from_html(resp_body: &str) -> Result<serde_json::Value, Strin
 }
 
 fn media_urls_from_post_data(
+    ctx: &ActionCtx,
     post_data: &serde_json::Value,
     referer: &Url,
     cookies: &HashMap<String, String>,
@@ -212,7 +219,7 @@ fn media_urls_from_post_data(
         .filter(|url| !url.is_empty())
     {
         trace!(?video_url, "Got video url from video data");
-        return Ok(vec![download_info(video_url, referer, cookies)]);
+        return Ok(vec![download_info(ctx, video_url, referer, cookies)]);
     }
 
     let image_urls = video_data
@@ -230,7 +237,7 @@ fn media_urls_from_post_data(
                         .and_then(|x| x.first())
                         .and_then(|x| x.as_str())
                 })
-                .map(|url| download_info(url, referer, cookies))
+                .map(|url| download_info(ctx, url, referer, cookies))
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
@@ -270,9 +277,14 @@ fn video_page_fallback_url(final_url: &Url) -> Result<Url, String> {
     Ok(fallback_url)
 }
 
-fn download_info(media_url: &str, referer: &Url, cookies: &HashMap<String, String>) -> UrlWithMeta {
+fn download_info(
+    ctx: &ActionCtx,
+    media_url: &str,
+    referer: &Url,
+    cookies: &HashMap<String, String>,
+) -> UrlWithMeta {
     let mut download_info = UrlWithMeta::from_url_str(media_url)
-        .with_header("User-Agent", &ActionsConfig::request().user_agent)
+        .with_header("User-Agent", &ctx.request.user_agent)
         .with_header("Referer", referer.as_str());
 
     if let Some(csrf_token) = cookies.get("tt_chain_token") {

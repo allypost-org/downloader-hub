@@ -35,7 +35,7 @@ const LIVENESS_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Supervised central client: dials central, authenticates as Admin, and
 /// **reconnects automatically** when the connection drops. Exits permanently
 /// only when there is no central config or the admin API key is rejected
-/// (`AuthResult::Unauthorized`) — so a bad key never hammers central.
+/// (`AuthResult::Unauthorized`) - so a bad key never hammers central.
 pub async fn connect_central(
     config: PeerCommsAdminConfig,
     central_slot: Arc<ArcSwapOption<CentralClient>>,
@@ -45,9 +45,11 @@ pub async fn connect_central(
         return;
     };
 
+    let mut peering: Option<Arc<PeeringEndpoint>> = None;
+
     let mut backoff_idx: usize = 0;
     loop {
-        let outcome = establish_once(&config, &api, &central_slot).await;
+        let outcome = establish_once(&config, &api, &central_slot, &mut peering).await;
 
         let permanent = match &outcome {
             EstablishOutcome::Unauthorized => true,
@@ -62,6 +64,11 @@ pub async fn connect_central(
         };
 
         if permanent {
+            if let Some(pe) = peering
+                && let Err(e) = pe.router.shutdown().await
+            {
+                warn!(?e, "Failed to shutdown peering router");
+            }
             return;
         }
 
@@ -82,6 +89,7 @@ async fn establish_once(
     config: &PeerCommsAdminConfig,
     api: &app_config::common::PeerCommsAdminApiConfig,
     central_slot: &Arc<ArcSwapOption<CentralClient>>,
+    peering: &mut Option<Arc<PeeringEndpoint>>,
 ) -> EstablishOutcome {
     let ticket = match fetch_ticket(api).await {
         Ok(t) => t,
@@ -91,34 +99,14 @@ async fn establish_once(
     debug!(?ticket, "Got admin join ticket");
 
     let central_addr = ticket.main.clone();
-    let pe = match PeeringEndpoint::builder(config.common.clone(), ticket.topic_id())
-        .with_main_node(Some(ticket.main.id))
-        .with_peers(
-            ticket
-                .peers()
-                .iter()
-                .cloned()
-                .chain([ticket.main])
-                .collect(),
-        )
-        .with_refresh_url(ticket.refresh_url)
-        .build()
-        .await
-    {
+
+    let pe = match ensure_peering(config, ticket, peering).await {
         Ok(pe) => pe,
-        Err(e) => {
-            return EstablishOutcome::Transient(
-                format!("Failed to build peering endpoint: {e:?}").into(),
-            );
-        }
+        Err(e) => return EstablishOutcome::Transient(e),
     };
 
-    if let Err(e) = PeeringEndpoint::init(pe) {
-        warn!(?e, "PeeringEndpoint already initialized; reusing existing");
-    }
-
     let client = irpc_iroh::client::<CentralProtocol>(
-        PeeringEndpoint::global().router.endpoint().clone(),
+        pe.router.endpoint().clone(),
         central_addr.clone(),
         app_peer_comms::rpc::RPC_ALPN,
     );
@@ -150,6 +138,36 @@ async fn establish_once(
 
     central_slot.store(None);
     EstablishOutcome::Lost
+}
+
+async fn ensure_peering(
+    config: &PeerCommsAdminConfig,
+    ticket: app_peer_comms::ticket::Ticket,
+    peering: &mut Option<Arc<PeeringEndpoint>>,
+) -> Result<Arc<PeeringEndpoint>, Box<dyn std::error::Error + Send + Sync>> {
+    if let Some(pe) = peering.as_ref() {
+        return Ok(Arc::clone(pe));
+    }
+
+    let pe = PeeringEndpoint::builder(config.common.clone(), ticket.topic_id())
+        .with_main_node(Some(ticket.main.id))
+        .with_peers(
+            ticket
+                .peers()
+                .iter()
+                .cloned()
+                .chain([ticket.main])
+                .collect(),
+        )
+        .with_refresh_url(ticket.refresh_url)
+        .build()
+        .await
+        .map_err(|e| format!("Failed to build peering endpoint: {e:?}"))?;
+
+    let pe = Arc::new(pe);
+    *peering = Some(Arc::clone(&pe));
+
+    Ok(pe)
 }
 
 async fn fetch_ticket(

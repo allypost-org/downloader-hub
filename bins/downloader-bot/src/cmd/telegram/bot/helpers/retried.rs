@@ -28,7 +28,7 @@ struct RateState {
     chats: HashMap<ChatId, ChatRateState>,
 }
 
-/// Lock ordering (must be respected to avoid deadlock): `lanes` → lane mutex → `state`.
+/// Lock ordering (must be respected to avoid deadlock): `lanes` -> lane mutex -> `state`.
 #[derive(Default)]
 struct OutboundLimiter {
     state: Mutex<RateState>,

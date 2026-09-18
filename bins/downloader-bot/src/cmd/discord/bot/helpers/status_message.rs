@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 use serenity::{
@@ -13,7 +13,7 @@ use tracing::{debug, trace, warn};
 
 use super::super::discord_bot::DiscordBot;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[allow(clippy::struct_field_names)]
 pub struct StatusMessage {
     channel_id: ChannelId,
@@ -25,6 +25,8 @@ pub struct StatusMessage {
     last_content: Option<String>,
     #[serde(default)]
     max_filesize: Option<Size>,
+    #[serde(skip)]
+    bot: Option<Arc<DiscordBot>>,
 }
 
 impl StatusMessage {
@@ -41,7 +43,19 @@ impl StatusMessage {
             status_msg_id,
             last_content: None,
             max_filesize: None,
+            bot: None,
         }
+    }
+
+    pub fn bot(&self) -> &DiscordBot {
+        self.bot
+            .as_ref()
+            .expect("discord bot attached to status message")
+    }
+
+    pub fn with_bot(mut self, bot: Arc<DiscordBot>) -> Self {
+        self.bot = Some(bot);
+        self
     }
 
     pub const fn channel_id(&self) -> ChannelId {
@@ -64,7 +78,7 @@ impl StatusMessage {
 
     pub fn max_filesize(&self) -> Size {
         self.max_filesize
-            .unwrap_or_else(DiscordBot::safe_max_filesize)
+            .unwrap_or_else(|| self.bot().safe_max_filesize())
     }
 
     pub const fn with_max_filesize(mut self, max_filesize: Size) -> Self {
@@ -76,8 +90,8 @@ impl StatusMessage {
         Self::new(msg.channel_id, msg.id, msg.author.id, None)
     }
 
-    fn http() -> &'static Http {
-        DiscordBot::bot()
+    fn http(&self) -> &Http {
+        self.bot().bot()
     }
 
     pub async fn send_sub_message(&self, text: &str) -> Option<Self> {
@@ -94,6 +108,7 @@ impl StatusMessage {
             status_msg_id: Some(new_msg.id),
             last_content: Some(text.to_string()),
             max_filesize: self.max_filesize,
+            bot: self.bot.clone(),
         })
     }
 
@@ -110,7 +125,7 @@ impl StatusMessage {
             .content(text)
             .reference_message(self.original_message_reference());
         self.channel_id
-            .send_message(Self::http(), builder)
+            .send_message(self.http(), builder)
             .await
             .map_err(|e| {
                 warn!(channel_id = ?self.channel_id, ?e, "Failed to send additional message");
@@ -151,7 +166,7 @@ impl StatusMessage {
         let builder = EditMessage::new().content(text);
         let res = self
             .channel_id
-            .edit_message(Self::http(), msg_id, builder)
+            .edit_message(self.http(), msg_id, builder)
             .await;
 
         if Self::is_unknown_message_err(&res) {
@@ -197,7 +212,7 @@ impl StatusMessage {
 
     async fn try_delete_message(&self) -> Result<(), Box<serenity::Error>> {
         if let Some(id) = self.status_msg_id {
-            self.channel_id.delete_message(Self::http(), id).await?;
+            self.channel_id.delete_message(self.http(), id).await?;
         }
         Ok(())
     }

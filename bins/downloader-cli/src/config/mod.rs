@@ -1,21 +1,19 @@
 use std::path::PathBuf;
 
+use app_actions::fixers::Fixer;
 use app_config::{
-    Dumpable, GlobalConfig,
+    BootConfig, Dumpable,
     common::{self},
     validators::{
         directory::{validate_is_writable_directory, value_parser_parse_valid_directory},
         file::{validate_is_files, value_parser_parse_valid_file},
-        print_validation_errors,
     },
 };
 use clap::{Args, Parser, ValueHint};
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
-#[derive(
-    Debug, Default, Clone, Serialize, Deserialize, Parser, Validate, GlobalConfig, Dumpable,
-)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, Parser, Validate, Dumpable)]
 pub struct Config {
     #[clap(flatten)]
     #[validate(nested)]
@@ -44,51 +42,23 @@ pub struct Config {
     dump: DumpConfig,
 }
 
-impl Config {
-    pub fn init_parsed() -> Result<&'static Self, String> {
-        let mut parsed = Self::parse().resolve_paths().validate_or_exit();
-
-        if parsed.run.no_auto_crop {
-            parsed.disabled_entries.entries.extend([
-                common::DisableEntry::new("fixer", "CropImage"),
-                common::DisableEntry::new("fixer", "CropVideoBars"),
-            ]);
-        }
-
-        let parsed = parsed.dump_if_needed();
-
-        {
-            let parsed = parsed.clone();
-            app_actions::config::init(
-                parsed.endpoint,
-                parsed.dependency_paths,
-                parsed.disabled_entries.entries,
-                parsed.request,
-            )?;
-        }
-
-        Self::init(parsed)
-    }
-
-    pub fn run() -> &'static RunConfig {
-        &Self::global().run
-    }
-
-    #[inline]
+impl BootConfig for Config {
     fn resolve_paths(mut self) -> Self {
         self.dependency_paths = self.dependency_paths.resolve_paths();
         self
     }
 
-    #[inline]
-    fn validate_or_exit(self) -> Self {
-        if let Err(e) = self.validate() {
-            eprintln!("Errors validating configuration:");
-            print_validation_errors(&e, "  ", 1);
-            std::process::exit(1);
+    fn init_parsed() -> Result<Self, String> {
+        let mut parsed = Self::parse_validated();
+
+        if parsed.run.no_auto_crop {
+            parsed.disabled_entries.entries.extend([
+                app_actions::fixers::handlers::crop_image::CropImage.entry_id(),
+                app_actions::fixers::handlers::crop_video_bars::CropVideoBars.entry_id(),
+            ]);
         }
 
-        self
+        Ok(parsed.dump_if_needed())
     }
 }
 

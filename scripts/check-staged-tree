@@ -1,0 +1,118 @@
+#!/bin/sh
+# Checks run against a snapshot of the git index, so a partial commit is
+# validated exactly as it would be committed: unstaged and untracked files
+# are invisible. Snapshots live in .git/precommit-snapshots/<tree-id> and
+# are reused until the staged tree changes.
+set -eu
+
+case $# in
+    1) ;;
+    *) echo "usage: check-staged-tree cargo|frontend|convex" >&2
+       exit 2 ;;
+esac
+kind=$1
+
+staged() {
+    git diff --cached --name-only --diff-filter=ACMR
+}
+
+case $kind in
+    cargo)
+        staged | grep -qE '\.rs$|Cargo\.(toml|lock)$' || exit 0
+        ;;
+    frontend)
+        staged | grep -q '^bins/downloader-admin/frontend/' || exit 0
+        ;;
+    convex)
+        staged | grep -q '^crates/app-database/convex/' || exit 0
+        ;;
+esac
+
+tree=$(git write-tree)
+git_dir=$(git rev-parse --absolute-git-dir)
+snap_dir="$git_dir/precommit-snapshots"
+snap="$snap_dir/$tree"
+mkdir -p "$snap_dir"
+
+(
+    flock 8
+    if [ ! -d "$snap" ]; then
+        rm -rf "$snap.tmp"
+        mkdir "$snap.tmp"
+        git archive "$tree" | tar -x -C "$snap.tmp"
+        mv "$snap.tmp" "$snap"
+    fi
+) 8>"$snap_dir/$tree.lock"
+
+# best-effort cleanup of week-old snapshots
+find "$snap_dir" -mindepth 1 -maxdepth 1 -type d -mtime +7 -exec rm -rf {} + 2>/dev/null || true
+
+root=$(git rev-parse --show-toplevel)
+export CARGO_TARGET_DIR="$root/target"
+# AGENTS.md: rustup's cargo must win over a distro cargo, which ignores
+# rust-toolchain.toml and has no musl std (E0463)
+PATH="$HOME/.cargo/bin:$PATH"
+export PATH
+
+cd "$snap"
+
+# the admin crate's RustEmbed derive needs frontend/dist to exist and
+# build.rs produces it via bun; point both JS packages at the real
+# worktree's node_modules so nothing gets installed inside the snapshot
+for pkg in bins/downloader-admin/frontend crates/app-database; do
+    if [ ! -d "$root/$pkg/node_modules" ]; then
+        echo "$pkg/node_modules missing; run: (cd $pkg && bun install)" >&2
+        exit 1
+    fi
+    ln -sfn "$root/$pkg/node_modules" "$pkg/node_modules"
+done
+
+case $kind in
+    cargo)
+        # build.rs must run: without it the snapshot has no frontend/dist and
+        # the RustEmbed derive fails to compile. The variable triggers on mere
+        # presence, so unset rather than blank it.
+        unset SKIP_FRONTEND_BUILD
+        # clippy --fix consults git state; the snapshot is not a repo
+        git init -q .
+        echo "==> Cargo.lock sync"
+        cargo metadata --locked --format-version 1 > /dev/null
+        echo "==> clippy"
+        cargo clippy --workspace --all-features -- -D warnings
+        echo "==> fmt-dev must not change any files"
+        rs_before="$snap.rs-before"
+        rm -rf "$rs_before"
+        mkdir -p "$rs_before"
+        find . -name '*.rs' -type f | while IFS= read -r f; do
+            mkdir -p "$rs_before/$(dirname "$f")"
+            cp "$f" "$rs_before/$f"
+        done
+        find . -name '*.rs' -type f | sort | xargs sha256sum > "$rs_before/hashes"
+        just fmt-dev > /dev/null
+        find . -name '*.rs' -type f | sort | xargs sha256sum > "$rs_before/hashes.after"
+        if ! cmp -s "$rs_before/hashes" "$rs_before/hashes.after"; then
+            echo "just fmt-dev changes the committed tree; run it and stage the result:" >&2
+            diff "$rs_before/hashes" "$rs_before/hashes.after" \
+                | grep '^[<>]' | awk '{print $NF}' | sort -u \
+                | while IFS= read -r f; do
+                    diff -u "$rs_before/$f" "$f" 2>/dev/null | head -40 >&2 || true
+                done
+            git --git-dir="$git_dir" archive "$tree" | tar -x -C "$snap"
+            rm -rf "$rs_before"
+            exit 1
+        fi
+        rm -rf "$rs_before"
+        ;;
+    frontend)
+        cd bins/downloader-admin/frontend
+        echo "==> bun install --frozen-lockfile"
+        bun install --frozen-lockfile --dry-run > /dev/null
+        echo "==> tsc"
+        exec bun run check
+        ;;
+    convex)
+        cd crates/app-database
+        echo "==> convex tsc"
+        exec bun run typecheck
+        ;;
+esac

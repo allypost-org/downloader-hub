@@ -11,7 +11,7 @@ use tokio::{fs, process::Command};
 use tracing::{debug, trace, warn};
 
 use crate::{
-    config::ActionsConfig,
+    ActionCtx,
     fixers::{
         Fixer, FixerReturn, IntoFixerReturn,
         common::{
@@ -28,14 +28,14 @@ pub struct CropVideoBars;
 #[async_trait::async_trait]
 #[typetag::serde]
 impl Fixer for CropVideoBars {
-    fn can_run(&self) -> bool {
-        ActionsConfig::dependency_paths()
-            .imagemagick_path()
-            .is_some()
+    async fn can_run(&self, ctx: &ActionCtx) -> bool {
+        ctx.dependency_paths.imagemagick_path().is_some()
     }
 
-    async fn can_run_for(&self, request: &FixRequest) -> bool {
-        let Ok(media_info) = ffprobe::ffprobe_async(&request.file_path).await else {
+    async fn can_run_for(&self, ctx: &ActionCtx, request: &FixRequest) -> bool {
+        let Ok(media_info) =
+            ffprobe::ffprobe_async(&ctx.dependency_paths, &request.file_path).await
+        else {
             return false;
         };
 
@@ -53,20 +53,18 @@ impl Fixer for CropVideoBars {
         "Crops dead space around the video. Supports both black and white outlines."
     }
 
-    /// Options:
-    ///
-    async fn run(&self, request: &FixRequest) -> FixerReturn {
-        do_auto_crop_video(&request.file_path)
+    async fn run(&self, ctx: &ActionCtx, request: &FixRequest) -> FixerReturn {
+        do_auto_crop_video(ctx, &request.file_path)
             .await
             .map(|x| FixResult::new(request.clone(), x))
             .into_fixer_return()
     }
 }
 
-async fn do_auto_crop_video(file_path: &Path) -> Result<PathBuf, CropError> {
+async fn do_auto_crop_video(ctx: &ActionCtx, file_path: &Path) -> Result<PathBuf, CropError> {
     debug!("Auto cropping video {file_path:?}");
 
-    let video_stream = get_video_stream(file_path).await?;
+    let video_stream = get_video_stream(ctx, file_path).await?;
 
     let (w, h) = {
         let video_stream = if let Some(s) = video_stream {
@@ -85,7 +83,7 @@ async fn do_auto_crop_video(file_path: &Path) -> Result<PathBuf, CropError> {
         }
     };
 
-    let final_crop_filter = match generate_crop_filter(file_path).await {
+    let final_crop_filter = match generate_crop_filter(ctx, file_path).await {
         Ok(mut f) => {
             f.intersect(&CropFilter {
                 width: w,
@@ -126,7 +124,7 @@ async fn do_auto_crop_video(file_path: &Path) -> Result<PathBuf, CropError> {
 
     trace!(?new_filename, "Using new filename for file");
 
-    let mut cmd = Command::new(ActionsConfig::dependency_paths().ffmpeg_path());
+    let mut cmd = Command::new(ctx.dependency_paths.ffmpeg_path());
     let res = cmd
         .arg("-y")
         .args(["-loglevel", "panic"])
@@ -158,7 +156,7 @@ async fn do_auto_crop_video(file_path: &Path) -> Result<PathBuf, CropError> {
     Ok(new_filename)
 }
 
-async fn generate_crop_filter(file_path: &Path) -> Result<CropFilter, CropError> {
+async fn generate_crop_filter(ctx: &ActionCtx, file_path: &Path) -> Result<CropFilter, CropError> {
     debug!(?file_path, "Generating crop filter");
 
     let tmp_dir = match TempDir::in_tmp_with_prefix("downloader-hub.crop-video-bars.") {
@@ -167,7 +165,7 @@ async fn generate_crop_filter(file_path: &Path) -> Result<CropFilter, CropError>
     };
     trace!(?tmp_dir, "Created temp dir to write frames to");
 
-    let mut cmd = Command::new(ActionsConfig::dependency_paths().ffmpeg_path());
+    let mut cmd = Command::new(ctx.dependency_paths.ffmpeg_path());
     let res = cmd
         .arg("-y")
         .arg("-i")
@@ -223,14 +221,17 @@ async fn generate_crop_filter(file_path: &Path) -> Result<CropFilter, CropError>
         entries
     };
 
-    let filter = CropFilter::from_image_files(&files_in_tmp_dir).await?;
+    let filter = CropFilter::from_image_files(ctx, &files_in_tmp_dir).await?;
     debug!(?filter, "Got crop filter");
 
     Ok(filter)
 }
 
-async fn get_video_stream(file_path: &Path) -> Result<Option<ffprobe::Stream>, CropError> {
-    let media_info = ffprobe::ffprobe_async(file_path)
+async fn get_video_stream(
+    ctx: &ActionCtx,
+    file_path: &Path,
+) -> Result<Option<ffprobe::Stream>, CropError> {
+    let media_info = ffprobe::ffprobe_async(&ctx.dependency_paths, file_path)
         .await
         .map_err(CropError::FfProbeError)?;
 

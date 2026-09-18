@@ -10,9 +10,7 @@ use tracing::{debug, trace};
 use url::Url;
 
 use super::{ExtractInfoRequest, ExtractedInfo, Extractor};
-use crate::{
-    config::ActionsConfig, downloaders::handlers::generic::Generic, extractors::ExtractedUrlInfo,
-};
+use crate::{ActionCtx, downloaders::handlers::generic::Generic, extractors::ExtractedUrlInfo};
 
 pub static URL_MATCH: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
@@ -48,13 +46,17 @@ impl Extractor for Twitter {
         Self::is_post_url(request.url.as_str())
     }
 
-    async fn extract_info(&self, request: &ExtractInfoRequest) -> Result<ExtractedInfo, String> {
+    async fn extract_info(
+        &self,
+        ctx: &ActionCtx,
+        request: &ExtractInfoRequest,
+    ) -> Result<ExtractedInfo, String> {
         debug!("Downloading tweet");
 
         let tweet_info = match get_tweet_info_from_url(request.url.as_str())? {
             Some(x) => x,
             None => {
-                let screenshot_url = self.screenshot_tweet_url_info(&request.url);
+                let screenshot_url = self.screenshot_tweet_url_info(ctx, &request.url);
                 return Ok(ExtractedInfo::from_url(request, screenshot_url));
             }
         };
@@ -74,7 +76,7 @@ impl Extractor for Twitter {
         trace!(?tweet_media, "Got tweet media");
 
         if tweet_info.username != "i" {
-            let tweet_screenshot_url = self.screenshot_tweet_url_info(&request.url);
+            let tweet_screenshot_url = self.screenshot_tweet_url_info(ctx, &request.url);
 
             trace!("Adding Tweet screenshot URL: {:?}", &tweet_screenshot_url);
             tweet_media.push(tweet_screenshot_url);
@@ -86,10 +88,8 @@ impl Extractor for Twitter {
 
 impl Twitter {
     #[must_use]
-    pub fn screenshot_tweet_url(&self, url: &Url) -> Url {
-        let mut endpoint = ActionsConfig::endpoints()
-            .twitter_screenshot_base_url
-            .clone();
+    pub fn screenshot_tweet_url(&self, ctx: &ActionCtx, url: &Url) -> Url {
+        let mut endpoint = ctx.endpoint.twitter_screenshot_base_url.clone();
 
         endpoint.set_path(url.as_str());
 
@@ -97,8 +97,8 @@ impl Twitter {
     }
 
     #[must_use]
-    pub fn screenshot_tweet_url_info(&self, url: &Url) -> ExtractedUrlInfo {
-        ExtractedUrlInfo::new(self.screenshot_tweet_url(url))
+    pub fn screenshot_tweet_url_info(&self, ctx: &ActionCtx, url: &Url) -> ExtractedUrlInfo {
+        ExtractedUrlInfo::new(self.screenshot_tweet_url(ctx, url))
             .with_preferred_downloader(Some(Generic))
             .with_downloader_options(Generic::options().with_timeout(Some(60.seconds())))
     }

@@ -118,7 +118,7 @@ COPY . .
 # Remove the source's rust-toolchain.toml so the build uses the toolchain
 # pinned by this image (RUST_VERSION ARG), matching what `deps` cooked with.
 # The source file says `channel = "stable"`, which makes rustup override
-# to a newer stable (e.g. 1.97) mid-build — changing the rustc hash and
+# to a newer stable (e.g. 1.97) mid-build - changing the rustc hash and
 # invalidating every fingerprint (full ~570-crate recompile).
 RUN rm -f rust-toolchain.toml
 # Build the embedded SPA before compiling the Rust binary. rust-embed bakes

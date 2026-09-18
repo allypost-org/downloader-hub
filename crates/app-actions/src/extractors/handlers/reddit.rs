@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 
 use super::{ExtractInfoRequest, ExtractedInfo, Extractor};
-use crate::downloaders::handlers::{generic::Generic, yt_dlp::YtDlp};
+use crate::{
+    ActionCtx,
+    downloaders::handlers::{generic::Generic, yt_dlp::YtDlp},
+};
 
 #[must_use]
 pub fn is_reddit_image_url(url: &str) -> bool {
@@ -22,7 +25,11 @@ impl Extractor for Reddit {
         Self::is_media_url(request.url.as_str())
     }
 
-    async fn extract_info(&self, request: &ExtractInfoRequest) -> Result<ExtractedInfo, String> {
+    async fn extract_info(
+        &self,
+        _ctx: &ActionCtx,
+        request: &ExtractInfoRequest,
+    ) -> Result<ExtractedInfo, String> {
         let url = {
             let mut x = request.url.clone();
             if x.query_pairs().all(|(k, _)| k != "s") {

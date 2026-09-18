@@ -9,7 +9,7 @@ use thiserror::Error;
 use tokio::{fs, process::Command};
 
 use super::{Action, ActionError, ActionRequest, ActionResult};
-use crate::config::ActionsConfig;
+use crate::ActionCtx;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct SplitScenes;
@@ -21,10 +21,8 @@ impl Action for SplitScenes {
         "Detect scenes in a video and split them into separate files."
     }
 
-    async fn can_run(&self) -> bool {
-        ActionsConfig::dependency_paths()
-            .scenedetect_path()
-            .is_some()
+    async fn can_run(&self, ctx: &ActionCtx) -> bool {
+        ctx.dependency_paths.scenedetect_path().is_some()
     }
 
     async fn can_run_for(&self, _req: &ActionRequest) -> bool {
@@ -33,21 +31,26 @@ impl Action for SplitScenes {
 
     /// Options:
     /// - `output-dir`: The output directory. Defaults to a temporary directory.
-    async fn run(&self, request: &ActionRequest) -> Result<ActionResult, ActionError> {
-        do_split_video_into_scenes(&request.file_path, &request.output_dir)
+    async fn run(
+        &self,
+        ctx: &ActionCtx,
+        request: &ActionRequest,
+    ) -> Result<ActionResult, ActionError> {
+        do_split_video_into_scenes(ctx, &request.file_path, &request.output_dir)
             .await
             .map(|x| ActionResult::paths(request, x))
     }
 }
 
 async fn do_split_video_into_scenes(
+    ctx: &ActionCtx,
     file_path: &Path,
     output_dir: &Path,
 ) -> Result<Vec<PathBuf>, ActionError> {
-    split_into_scenes(SplitVideoConfig::new(
-        output_dir.to_path_buf(),
-        file_path.to_path_buf(),
-    ))
+    split_into_scenes(
+        ctx,
+        SplitVideoConfig::new(output_dir.to_path_buf(), file_path.to_path_buf()),
+    )
     .await
 }
 
@@ -75,8 +78,11 @@ impl SplitVideoConfig {
     }
 }
 
-async fn split_into_scenes(config: SplitVideoConfig) -> Result<Vec<PathBuf>, ActionError> {
-    let scenedetect_path = match ActionsConfig::dependency_paths().scenedetect_path() {
+async fn split_into_scenes(
+    ctx: &ActionCtx,
+    config: SplitVideoConfig,
+) -> Result<Vec<PathBuf>, ActionError> {
+    let scenedetect_path = match ctx.dependency_paths.scenedetect_path() {
         Some(x) => x,
         None => return Err(SplitScenesError::ScenedetectNotFound.into()),
     };

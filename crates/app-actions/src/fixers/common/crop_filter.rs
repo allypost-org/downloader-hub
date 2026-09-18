@@ -9,7 +9,7 @@ use tokio::{
 use tracing::{debug, trace};
 
 use super::{FixerError, FixerReturn, command::CmdError};
-use crate::{config::ActionsConfig, fixers::IntoFixerReturn};
+use crate::{ActionCtx, fixers::IntoFixerReturn};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CropFilter {
@@ -57,8 +57,8 @@ impl CropFilter {
         format!("{}x{}{}{}", self.width, self.height, x, y)
     }
 
-    pub async fn from_image_files(files: &[PathBuf]) -> Result<Self, CropError> {
-        generate_crop_filter_for_files(files, None).await
+    pub async fn from_image_files(ctx: &ActionCtx, files: &[PathBuf]) -> Result<Self, CropError> {
+        generate_crop_filter_for_files(ctx, files, None).await
     }
 }
 
@@ -106,6 +106,7 @@ impl IntoFixerReturn for CropError {
 }
 
 async fn generate_crop_filter_for_files(
+    ctx: &ActionCtx,
     files: &[PathBuf],
     initial_filter: Option<&CropFilter>,
 ) -> Result<CropFilter, CropError> {
@@ -115,7 +116,7 @@ async fn generate_crop_filter_for_files(
     const MIN_WIDTH: i64 = 4;
     const MIN_HEIGHT: i64 = 4;
     let mut cmd = Command::new(
-        ActionsConfig::dependency_paths()
+        ctx.dependency_paths
             .imagemagick_path()
             .expect("Imagemagick not found"),
     );
@@ -188,7 +189,6 @@ async fn generate_crop_filter_for_files(
                 continue;
             }
 
-            // trace!(?line, ?line_filter, "Parsed line to filter");
             filter.union(&line_filter);
         }
 

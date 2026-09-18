@@ -35,10 +35,10 @@ export function DashboardPage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {counts.data ? toNumber(counts.data[s]) : "—"}
+                {counts.data ? toNumber(counts.data[s]) : "\u2014"}
               </div>
               <p className="text-xs text-muted-foreground">
-                {counts.isLoading ? "loading…" : "requests"}
+                {counts.isLoading ? "loading\u2026" : "requests"}
               </p>
             </CardContent>
           </Card>
@@ -51,7 +51,7 @@ export function DashboardPage() {
         </CardHeader>
         <CardContent>
           {recentFailed.isLoading ? (
-            <p className="text-muted-foreground">Loading…</p>
+            <p className="text-muted-foreground">Loading...</p>
           ) : recentFailed.data && recentFailed.data.length > 0 ? (
             <ul className="space-y-2 text-sm">
               {recentFailed.data.map((r) => (

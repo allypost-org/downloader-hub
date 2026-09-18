@@ -17,11 +17,10 @@ use super::{ExtractInfoRequest, ExtractedInfo, Extractor};
 
 pub type ExtractorEntry = Arc<dyn Extractor + Sync + Send>;
 
-pub static AVAILABLE_EXTRACTORS: LazyLock<Vec<ExtractorEntry>> =
-    LazyLock::new(available_extractors);
+pub static ALL_EXTRACTORS: LazyLock<Vec<ExtractorEntry>> = LazyLock::new(all_extractors);
 
 #[must_use]
-pub fn available_extractors() -> Vec<ExtractorEntry> {
+pub fn all_extractors() -> Vec<ExtractorEntry> {
     vec![
         Arc::new(threads::Threads),
         Arc::new(imgur::Imgur),

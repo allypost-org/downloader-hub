@@ -9,7 +9,10 @@ use serde::{Deserialize, Serialize};
 use tracing::trace;
 use url::Url;
 
-use crate::extractors::{ExtractInfoRequest, ExtractedInfo, Extractor};
+use crate::{
+    ActionCtx,
+    extractors::{ExtractInfoRequest, ExtractedInfo, Extractor},
+};
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Threads;
@@ -34,7 +37,11 @@ impl Extractor for Threads {
             && POST_REGEX.is_match(request.url.path())
     }
 
-    async fn extract_info(&self, request: &ExtractInfoRequest) -> Result<ExtractedInfo, String> {
+    async fn extract_info(
+        &self,
+        _ctx: &ActionCtx,
+        request: &ExtractInfoRequest,
+    ) -> Result<ExtractedInfo, String> {
         let url = {
             let mut url = request.url.clone();
             url.query_pairs_mut().clear();
@@ -128,7 +135,7 @@ impl Extractor for Threads {
 
         trace!("Deserialized page data from threads");
 
-        // Find all string values
+        // Find the first object whose `result` object contains a `data` key
         let yielder = TreeYielder::new(|v| {
             let Some(obj) = v.as_object() else {
                 return false;

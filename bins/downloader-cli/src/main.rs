@@ -1,20 +1,20 @@
-use std::{collections::HashSet, fmt::Debug, io::stderr, path::PathBuf, result::Result};
+use std::{collections::HashSet, fmt::Debug, io::stderr, path::PathBuf, result::Result, sync::Arc};
 
 use app_actions::{
+    Actions,
     actions::{
         Action, ActionRequest,
         handlers::{file_rename_to_id::RenameToId, split_scenes::SplitScenes},
     },
-    download_file,
     extractors::ExtractInfoRequest,
-    fix_file,
 };
+use app_config::BootConfig;
 use futures::{StreamExt, stream::FuturesUnordered};
 use http::{HeaderValue, header};
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::{filter::LevelFilter, util::SubscriberInitExt};
 
-use crate::config::Config;
+use crate::config::{Config, RunConfig};
 
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
@@ -28,12 +28,21 @@ async fn main() {
 
     let config = Config::init_parsed().expect("Failed to init config");
 
-    debug!(config = ?*config, "Running with config");
+    let actions = Actions::new(
+        Arc::new(app_actions::ActionCtx::new(
+            config.endpoint.clone(),
+            config.dependency_paths.clone(),
+            config.request.clone(),
+        )),
+        config.disabled_entries.entries.clone(),
+    );
 
-    let urls = get_explicit_urls();
+    debug!(config = ?config, "Running with config");
+
+    let urls = get_explicit_urls(&config.run);
     let mut urls = print_errors("urls", urls);
 
-    let files = get_explicit_files();
+    let files = get_explicit_files(&config.run);
     let mut files = print_errors("files", files);
 
     let cli_config = &config.run;
@@ -70,6 +79,7 @@ async fn main() {
         .into_iter()
         .map(|url| {
             let cookie = cookie.clone();
+            let actions = actions.clone();
             async move {
                 let url_str = url.to_string();
                 let mut request = ExtractInfoRequest::new(url);
@@ -79,7 +89,8 @@ async fn main() {
                         Err(e) => warn!("Ignoring invalid --cookie value: {e}"),
                     }
                 }
-                download_file(request, &cli_config.output_directory)
+                actions
+                    .download_file(request, &cli_config.output_directory)
                     .await
                     .into_iter()
                     .map(|x| x.map_err(|e| (url_str.clone(), e)))
@@ -111,11 +122,15 @@ async fn main() {
     info!("Starting fixing of {} files", to_fix.len());
     let fixed_files = to_fix
         .into_iter()
-        .map(|x| async move {
-            fix_file(&x)
-                .await
-                .map(|n| (x.clone(), n))
-                .map_err(|e| (x, e))
+        .map(|x| {
+            let actions = actions.clone();
+            async move {
+                actions
+                    .fix_file(&x)
+                    .await
+                    .map(|n| (x.clone(), n))
+                    .map_err(|e| (x, e))
+            }
         })
         .collect::<FuturesUnordered<_>>()
         .collect::<Vec<_>>()
@@ -145,14 +160,14 @@ async fn main() {
                     }
                 };
 
-                if let Err(e) = RenameToId.run(&req).await {
+                if let Err(e) = RenameToId.run(actions.ctx(), &req).await {
                     error!("Failed to rename {new:?}: {e:?}");
                 }
             }
         }
     }
 
-    let split_files = get_explicit_split_files()
+    let split_files = get_explicit_split_files(&config.run)
         .into_iter()
         .flatten()
         .collect::<Vec<_>>();
@@ -161,7 +176,7 @@ async fn main() {
     for f in split_files {
         let req = ActionRequest::new(f.clone(), cli_config.output_directory.clone());
 
-        if let Err(e) = SplitScenes.run(&req).await {
+        if let Err(e) = SplitScenes.run(actions.ctx(), &req).await {
             error!("Failed to split {f:?}: {e}");
             failed_split.push((f.clone(), e));
         }
@@ -229,10 +244,8 @@ fn print_errors<T: Sized>(name: &str, maybe_errors: Vec<Result<T, String>>) -> V
         .collect()
 }
 
-fn get_explicit_urls() -> Vec<Result<url::Url, String>> {
-    Config::global()
-        .run
-        .entries_group
+fn get_explicit_urls(run: &RunConfig) -> Vec<Result<url::Url, String>> {
+    run.entries_group
         .urls
         .iter()
         .map(|x| (x, parse_url(x)))
@@ -247,9 +260,8 @@ fn parse_url(u: &str) -> Result<url::Url, String> {
     url::Url::parse(u).map_err(|x| x.to_string())
 }
 
-fn get_explicit_split_files() -> Vec<Result<PathBuf, String>> {
-    Config::run()
-        .entries_group
+fn get_explicit_split_files(run: &RunConfig) -> Vec<Result<PathBuf, String>> {
+    run.entries_group
         .split_files
         .iter()
         .map(|x| (x, parse_file(x)))
@@ -260,9 +272,8 @@ fn get_explicit_split_files() -> Vec<Result<PathBuf, String>> {
         .collect::<Vec<_>>()
 }
 
-fn get_explicit_files() -> Vec<Result<PathBuf, String>> {
-    Config::run()
-        .entries_group
+fn get_explicit_files(run: &RunConfig) -> Vec<Result<PathBuf, String>> {
+    run.entries_group
         .files
         .iter()
         .map(|x| (x, parse_file(x)))

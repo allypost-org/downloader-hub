@@ -8,12 +8,9 @@ use tracing::{trace, warn};
 
 use crate::cmd::{
     _common::request_processor::PlatformDelivery,
-    telegram::bot::{
-        TelegramBot,
-        helpers::{
-            file_group::files_to_input_media_groups, retried::try_send_to_retrying,
-            status_message::StatusMessage,
-        },
+    telegram::bot::helpers::{
+        file_group::files_to_input_media_groups, retried::try_send_to_retrying,
+        status_message::StatusMessage,
     },
 };
 
@@ -31,7 +28,8 @@ impl PlatformDelivery for StatusMessage {
     }
 
     fn is_owner_request(&self) -> bool {
-        TelegramBot::owner_id()
+        self.bot()
+            .owner_id()
             .is_some_and(|owner_id| self.chat_id().as_user().is_some_and(|x| x == owner_id))
     }
 
@@ -39,35 +37,43 @@ impl PlatformDelivery for StatusMessage {
         &self,
         files: &[(TempFile, Option<PathBuf>)],
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        copy_files_to_save_dir(files).await
+        copy_files_to_save_dir(files, self.bot().owner_download_dir()).await
     }
 
     async fn send_batches(
         &self,
         files: &[(TempFile, Option<PathBuf>)],
     ) -> Vec<(Option<PathBuf>, String)> {
-        let (media_groups, failed_files) =
-            files_to_input_media_groups(files.iter().map(|(x, _)| x), self.max_filesize()).await;
+        let (media_groups, failed_files) = files_to_input_media_groups(
+            Arc::clone(&self.bot().dependency_paths),
+            files.iter().map(|(x, _)| x),
+            self.max_filesize(),
+        )
+        .await;
 
         let replying_to_id = self.msg_replying_to_id();
         let chat_id = self.chat_id();
+        let tg = self.bot_arc();
         let mut failures: Vec<(Option<PathBuf>, String)> = failed_files
             .into_iter()
             .map(|(path, err)| (Some(path), err))
             .collect();
 
         for (media_group, paths) in media_groups {
+            let tg = Arc::clone(&tg);
             let res = try_send_to_retrying(
                 chat_id,
                 media_group,
-                Box::new(move |chat_id, media_group| async move {
-                    TelegramBot::bot()
-                        .send_media_group(chat_id, media_group)
-                        .reply_parameters(
-                            ReplyParameters::new(replying_to_id).allow_sending_without_reply(),
-                        )
-                        .send()
-                        .await
+                Box::new(move |chat_id, media_group| {
+                    let tg = Arc::clone(&tg);
+                    async move {
+                        tg.send_media_group(chat_id, media_group)
+                            .reply_parameters(
+                                ReplyParameters::new(replying_to_id).allow_sending_without_reply(),
+                            )
+                            .send()
+                            .await
+                    }
                 }),
             )
             .await;
@@ -89,8 +95,9 @@ impl PlatformDelivery for StatusMessage {
 #[tracing::instrument(skip_all)]
 async fn copy_files_to_save_dir(
     fixed_file_paths: &[(TempFile, Option<PathBuf>)],
+    download_dir: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let download_dir = match TelegramBot::owner_download_dir() {
+    let download_dir = match download_dir {
         Some(x) => x,
         None => return Ok(()),
     };
@@ -118,12 +125,10 @@ async fn copy_files_to_save_dir(
     Ok(())
 }
 
-/// Re-export so the message handler / startup path can ask the keyed
-/// supervisor to start a request task with the Telegram status message.
 pub use crate::cmd::_common::request_processor::{supervisor, watch_and_process};
 
-/// Kick off a supervised per-request task for Telegram.
 pub async fn start_request_task(
+    rpc: Arc<crate::peering::rpc::RpcClient>,
     request_id: Arc<str>,
     status_message: StatusMessage,
     is_recovery: bool,
@@ -131,7 +136,7 @@ pub async fn start_request_task(
     supervisor()
         .start(
             request_id.clone(),
-            watch_and_process(request_id, status_message, is_recovery),
+            watch_and_process(rpc, request_id, status_message, is_recovery),
         )
         .await;
 }

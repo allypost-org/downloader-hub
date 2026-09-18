@@ -1,4 +1,4 @@
-use std::{future::Future, pin::Pin};
+use std::sync::Arc;
 
 use app_database::entity::accounts::{
     AccountPlace, AccountPlaceRef, AccountUser, AccountUserRef, Platform,
@@ -12,6 +12,7 @@ use teloxide::{
 };
 
 use super::super::TelegramBot;
+use crate::cmd::_common::account_refresh::{PlaceFetchFut, UserFetchFut};
 
 /// Build the end-user snapshot + ref from `msg.from`. Returns `None` for
 /// channel posts and other messages with no sender (those have only a chat).
@@ -44,7 +45,6 @@ fn build_user_display_name(user: &User) -> Option<String> {
     Some(name)
 }
 
-/// Build the place (chat) snapshot + ref.
 #[must_use]
 pub fn place_from_chat(chat: &Chat) -> (AccountPlace, AccountPlaceRef) {
     let id = chat.id.to_string();
@@ -75,18 +75,20 @@ const fn chat_kind_str(kind: &ChatKind) -> &'static str {
     }
 }
 
-pub fn fetch_user_fut(
-    platform_id: &str,
-) -> Pin<Box<dyn Future<Output = Result<AccountUser, String>> + Send>> {
-    let id = platform_id.to_string();
-    Box::pin(async move { fetch_user_by_platform_id(&id).await })
+pub fn fetch_user_fut(bot: Arc<TelegramBot>) -> impl Fn(&str) -> UserFetchFut {
+    move |platform_id| {
+        let id = platform_id.to_string();
+        let bot = bot.clone();
+        Box::pin(async move { fetch_user_by_platform_id(&bot, &id).await })
+    }
 }
 
-pub fn fetch_place_fut(
-    platform_id: &str,
-) -> Pin<Box<dyn Future<Output = Result<AccountPlace, String>> + Send>> {
-    let id = platform_id.to_string();
-    Box::pin(async move { fetch_place_by_platform_id(&id).await })
+pub fn fetch_place_fut(bot: Arc<TelegramBot>) -> impl Fn(&str) -> PlaceFetchFut {
+    move |platform_id| {
+        let id = platform_id.to_string();
+        let bot = bot.clone();
+        Box::pin(async move { fetch_place_by_platform_id(&bot, &id).await })
+    }
 }
 
 fn parse_chat_id(platform_id: &str) -> Result<ChatId, String> {
@@ -96,10 +98,13 @@ fn parse_chat_id(platform_id: &str) -> Result<ChatId, String> {
     Ok(ChatId(id))
 }
 
-pub async fn fetch_user_by_platform_id(platform_id: &str) -> Result<AccountUser, String> {
-    let bot = TelegramBot::bot();
+pub async fn fetch_user_by_platform_id(
+    bot: &TelegramBot,
+    platform_id: &str,
+) -> Result<AccountUser, String> {
     let chat_id = parse_chat_id(platform_id)?;
     let chat = bot
+        .bot()
         .get_chat(chat_id)
         .await
         .map_err(|e| format!("get_chat failed: {e}"))?;
@@ -107,10 +112,13 @@ pub async fn fetch_user_by_platform_id(platform_id: &str) -> Result<AccountUser,
         .ok_or_else(|| format!("chat {platform_id} is not a user private chat"))
 }
 
-pub async fn fetch_place_by_platform_id(platform_id: &str) -> Result<AccountPlace, String> {
-    let bot = TelegramBot::bot();
+pub async fn fetch_place_by_platform_id(
+    bot: &TelegramBot,
+    platform_id: &str,
+) -> Result<AccountPlace, String> {
     let chat_id = parse_chat_id(platform_id)?;
     let chat = bot
+        .bot()
         .get_chat(chat_id)
         .await
         .map_err(|e| format!("get_chat failed: {e}"))?;

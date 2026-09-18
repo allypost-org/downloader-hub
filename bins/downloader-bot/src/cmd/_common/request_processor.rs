@@ -29,10 +29,7 @@ use tokio::{
 };
 use tracing::{debug, info, trace, warn};
 
-use crate::{
-    cmd::_common::downloadable::Downloadable,
-    peering::{reconnect, rpc::RpcClient},
-};
+use crate::{cmd::_common::downloadable::Downloadable, peering::rpc::RpcClient};
 
 /// Slightly shorter than the 10-minute delivery lease so the bot can release
 /// the matching lease itself before the scheduled cleanup normally fires.
@@ -59,7 +56,6 @@ const FINISH_RETRY_DELAYS: &[Duration] = &[
     Duration::from_secs(5),
 ];
 
-/// Download concurrency per delivery attempt.
 const DOWNLOAD_CONCURRENCY: usize = 4;
 const STATUS_UPDATE_DEBOUNCE: Duration = Duration::from_millis(250);
 
@@ -72,7 +68,7 @@ const STATUS_UPDATE_DEBOUNCE: Duration = Duration::from_millis(250);
 /// type; both implementations are reconstructible from stored request metadata
 /// for startup recovery.
 ///
-/// This is task ownership + delivery behavior only — the database `ackDelivery`
+/// This is task ownership + delivery behavior only - the database `ackDelivery`
 /// lease is the real delivery lock. The trait never decides ownership.
 pub trait PlatformDelivery: Send + 'static {
     /// Update the status message text (edit/suppress per platform rules).
@@ -81,13 +77,9 @@ pub trait PlatformDelivery: Send + 'static {
     /// Send a supplemental (non-status) message.
     fn send_supplemental_message(&self, text: &str)
     -> impl std::future::Future<Output = ()> + Send;
-    /// Delete the status message.
     fn delete_status_message(&self) -> impl std::future::Future<Output = ()> + Send;
 
-    /// True if this request originated from the bot owner (and files should be
-    /// copied to the owner download directory).
     fn is_owner_request(&self) -> bool;
-    /// Copy the downloaded files to the owner directory, if applicable.
     fn copy_files_to_owner_dir(
         &self,
         files: &[(TempFile, Option<PathBuf>)],
@@ -173,15 +165,20 @@ impl RequestSupervisor {
 /// already `delivering`; such a task stays subscribed through lease expiry
 /// instead of exiting when it sees `Delivering` before claiming.
 #[tracing::instrument(name = "bot-request-watch", skip_all, fields(?request_id))]
-pub async fn watch_and_process<P>(request_id: Arc<str>, mut platform: P, is_recovery: bool)
-where
+pub async fn watch_and_process<P>(
+    rpc: Arc<RpcClient>,
+    request_id: Arc<str>,
+    mut platform: P,
+    is_recovery: bool,
+) where
     P: PlatformDelivery,
 {
+    let rpc = rpc.as_ref();
     let mut delivery_attempts: usize = 0;
     let mut stream_failures: usize = 0;
 
     loop {
-        match open_watch(request_id.clone()).await {
+        match open_watch(rpc, request_id.clone()).await {
             Ok(mut rx) => {
                 let outcome = drive_watch(
                     &mut rx,
@@ -189,6 +186,7 @@ where
                     &mut platform,
                     is_recovery,
                     &mut delivery_attempts,
+                    rpc,
                 )
                 .await;
                 match outcome {
@@ -198,7 +196,7 @@ where
                         backoff_after_error(stream_failures).await;
                     }
                     WatchOutcome::Reconnect => {
-                        if let Err(e) = reconnect().await {
+                        if let Err(e) = rpc.reconnect().await {
                             warn!(?e, ?request_id, "reconnect failed after watch close");
                         }
                         stream_failures = stream_failures.saturating_add(1);
@@ -208,7 +206,7 @@ where
             }
             Err(e) => {
                 warn!(?e, ?request_id, "failed to open watch; reconnecting");
-                if let Err(re) = reconnect().await {
+                if let Err(re) = rpc.reconnect().await {
                     warn!(?re, ?request_id, "reconnect failed after watch open error");
                 }
                 stream_failures = stream_failures.saturating_add(1);
@@ -236,6 +234,7 @@ async fn drive_watch<P>(
     platform: &mut P,
     is_recovery: bool,
     delivery_attempts: &mut usize,
+    rpc: &RpcClient,
 ) -> WatchOutcome
 where
     P: PlatformDelivery,
@@ -249,7 +248,6 @@ where
             Some(event) => event,
             None => match rx.recv().await {
                 Ok(Some(event)) => event,
-                // stream closed cleanly
                 Ok(None) => return WatchOutcome::Closed,
                 Err(e) => {
                     warn!(
@@ -315,13 +313,13 @@ where
                         }
                         continue;
                     }
-                    // waitingForRequester: claim a delivery attempt.
                     match claim_and_deliver(
                         rx,
                         request_id.clone(),
                         platform,
                         is_recovery,
                         delivery_attempts,
+                        rpc,
                     )
                     .await
                     {
@@ -458,6 +456,7 @@ async fn watch_for_delivery_abort(rx: &mut Receiver<WorkRequestWatchEvent>) -> D
 }
 
 async fn abort_claimed_delivery<P>(
+    rpc: &RpcClient,
     request_id: Arc<str>,
     attempt: Arc<str>,
     platform: &mut P,
@@ -471,7 +470,7 @@ async fn abort_claimed_delivery<P>(
         ?abort,
         "delivery aborted while request left waiting state"
     );
-    if let Err(e) = release_delivery(request_id, attempt, lease_deadline).await {
+    if let Err(e) = release_delivery(rpc, request_id, attempt, lease_deadline).await {
         warn!(?e, "failed to release delivery after abort");
     }
     match abort {
@@ -496,11 +495,12 @@ async fn claim_and_deliver<P>(
     platform: &mut P,
     is_recovery: bool,
     delivery_attempts: &mut usize,
+    rpc: &RpcClient,
 ) -> ClaimOutcome
 where
     P: PlatformDelivery,
 {
-    let ack = match RpcClient::work_request_ack(request_id.clone()).await {
+    let ack = match rpc.work_request_ack(request_id.clone()).await {
         Ok(ack) => ack,
         Err(e) => {
             warn!(
@@ -522,6 +522,7 @@ where
                 request_id,
                 platform,
                 delivery_attempts,
+                rpc,
                 delivery_attempt_id,
                 files,
             )
@@ -537,7 +538,6 @@ where
             }
         }
         WorkRequestAckResult::NotWaitingForRequester => {
-            // reopen/continue the watch to obtain current state.
             debug!(
                 ?request_id,
                 "ack not waiting for requester; continuing watch"
@@ -564,6 +564,7 @@ async fn deliver_claimed<P>(
     request_id: Arc<str>,
     platform: &mut P,
     delivery_attempts: &mut usize,
+    rpc: &RpcClient,
     attempt: Arc<str>,
     files: Arc<[FileReference]>,
 ) -> ClaimOutcome
@@ -575,13 +576,14 @@ where
     let lease_deadline = lease_started_at + DELIVERY_LEASE_TIMEOUT;
     let download = timeout_at(
         operation_deadline,
-        download_and_deliver(request_id.clone(), files, platform),
+        download_and_deliver(rpc, request_id.clone(), files, platform),
     );
 
     let download_result = tokio::select! {
         biased;
         abort = watch_for_delivery_abort(rx) => {
             abort_claimed_delivery(
+                rpc,
                 request_id.clone(),
                 attempt.clone(),
                 platform,
@@ -596,12 +598,15 @@ where
 
     match download_result {
         Ok(()) => {
-            match finish_delivery(request_id.clone(), attempt.clone(), operation_deadline).await {
+            match finish_delivery(rpc, request_id.clone(), attempt.clone(), operation_deadline)
+                .await
+            {
                 FinishOutcome::Finished => ClaimOutcome::Finished,
                 FinishOutcome::Unavailable => ClaimOutcome::Unavailable,
                 FinishOutcome::Continue => ClaimOutcome::Reopen,
                 FinishOutcome::Retry => {
                     retry_delivery(
+                        rpc,
                         request_id,
                         attempt,
                         platform,
@@ -618,6 +623,7 @@ where
                 "delivery operation timed out; retrying delivery"
             );
             retry_delivery(
+                rpc,
                 request_id,
                 attempt,
                 platform,
@@ -630,6 +636,7 @@ where
 }
 
 async fn retry_delivery<P>(
+    rpc: &RpcClient,
     request_id: Arc<str>,
     attempt: Arc<str>,
     platform: &mut P,
@@ -641,7 +648,7 @@ where
 {
     *delivery_attempts = delivery_attempts.saturating_add(1);
     if *delivery_attempts >= MAX_DELIVERY_ATTEMPTS {
-        return match fail_delivery(request_id.clone(), attempt, lease_deadline).await {
+        return match fail_delivery(rpc, request_id.clone(), attempt, lease_deadline).await {
             FailDeliveryOutcome::Failed => {
                 platform
                     .update_status_message(DELIVERY_FAILURE_REASON)
@@ -652,7 +659,7 @@ where
             FailDeliveryOutcome::Reopen => ClaimOutcome::Reopen,
         };
     }
-    if let Err(e) = release_delivery(request_id.clone(), attempt, lease_deadline).await {
+    if let Err(e) = release_delivery(rpc, request_id.clone(), attempt, lease_deadline).await {
         warn!(?e, ?request_id, "failed to release delivery attempt");
     }
     delivery_retry_backoff(*delivery_attempts).await;
@@ -669,6 +676,7 @@ where
 /// reported to the user; the request is still completed afterwards.
 #[tracing::instrument(name = "bot-delivery", skip_all, fields(?request_id))]
 pub async fn download_and_deliver<P>(
+    rpc: &RpcClient,
     request_id: Arc<str>,
     files: Arc<[FileReference]>,
     platform: &mut P,
@@ -687,18 +695,18 @@ pub async fn download_and_deliver<P>(
         .update_status_message("Downloading media to bot...")
         .await;
 
-    // Bounded-concurrency download. Await/collect the futures before grouping,
-    // copying, or uploading (reuse the join_all/FuturesUnordered style).
     let concurrency_sem = Arc::new(tokio::sync::Semaphore::new(DOWNLOAD_CONCURRENCY));
+    let peering = rpc.peering();
     let downloaded_futures = files.iter().enumerate().map(|(i, x)| {
         let concurrency_sem = concurrency_sem.clone();
+        let peering = peering.clone();
         async move {
             let _permit = concurrency_sem.acquire().await?;
             let temp_file =
                 tokio::task::spawn_blocking(|| TempFile::new_with_prefix("downloader-bot-dl-"))
                     .await??;
             let tokio_file = tokio::fs::File::from(temp_file.try_clone_file()?);
-            let (_, suggested_name) = x.download_into(tokio_file).await?;
+            let (_, suggested_name) = x.download_into(&peering, tokio_file).await?;
             debug!(file_index = i, "downloaded file for delivery");
             Ok::<(TempFile, Option<PathBuf>), anyhow::Error>((temp_file, suggested_name))
         }
@@ -728,11 +736,9 @@ pub async fn download_and_deliver<P>(
             .await;
     }
 
-    // Upload batches through the platform.
     let upload_failures = platform.send_batches(&downloaded_files).await;
 
-    // Accumulate per-file failure notices (download + upload). The request is
-    // still completed afterwards (partial-delivery semantics).
+    // The request is still completed afterwards (partial-delivery semantics).
     let mut errs: Vec<String> = Vec::new();
     for err in download_failures {
         errs.push(format!("Failed to download file: {err}"));
@@ -765,6 +771,7 @@ enum FinishOutcome {
 /// Retry `WorkRequestFinishDelivery` with the reconnect coordinator while the
 /// operation lease remains valid. Never finishes with a stale id.
 async fn finish_delivery(
+    rpc: &RpcClient,
     request_id: Arc<str>,
     delivery_attempt_id: Arc<str>,
     deadline: Instant,
@@ -772,10 +779,7 @@ async fn finish_delivery(
     for (attempt, delay) in FINISH_RETRY_DELAYS.iter().enumerate() {
         match timeout_at(
             deadline,
-            RpcClient::work_request_finish_delivery(
-                request_id.clone(),
-                delivery_attempt_id.clone(),
-            ),
+            rpc.work_request_finish_delivery(request_id.clone(), delivery_attempt_id.clone()),
         )
         .await
         {
@@ -813,7 +817,7 @@ async fn finish_delivery(
                     attempt,
                     "finish: transport error; reconnecting"
                 );
-                if timeout_at(deadline, reconnect()).await.is_err() {
+                if timeout_at(deadline, rpc.reconnect()).await.is_err() {
                     return FinishOutcome::Retry;
                 }
             }
@@ -836,6 +840,7 @@ enum FailDeliveryOutcome {
 }
 
 async fn fail_delivery(
+    rpc: &RpcClient,
     request_id: Arc<str>,
     delivery_attempt_id: Arc<str>,
     deadline: Instant,
@@ -843,7 +848,7 @@ async fn fail_delivery(
     for (attempt, delay) in FINISH_RETRY_DELAYS.iter().enumerate() {
         match timeout_at(
             deadline,
-            RpcClient::work_request_fail_delivery(
+            rpc.work_request_fail_delivery(
                 request_id.clone(),
                 delivery_attempt_id.clone(),
                 Arc::from(DELIVERY_FAILURE_REASON),
@@ -880,7 +885,7 @@ async fn fail_delivery(
                     attempt,
                     "fail delivery transport error; reconnecting"
                 );
-                if timeout_at(deadline, reconnect()).await.is_err() {
+                if timeout_at(deadline, rpc.reconnect()).await.is_err() {
                     return FailDeliveryOutcome::Reopen;
                 }
             }
@@ -896,6 +901,7 @@ async fn fail_delivery(
 }
 
 async fn release_delivery(
+    rpc: &RpcClient,
     request_id: Arc<str>,
     delivery_attempt_id: Arc<str>,
     deadline: Instant,
@@ -903,10 +909,7 @@ async fn release_delivery(
     for delay in FINISH_RETRY_DELAYS {
         match timeout_at(
             deadline,
-            RpcClient::work_request_release_delivery(
-                request_id.clone(),
-                delivery_attempt_id.clone(),
-            ),
+            rpc.work_request_release_delivery(request_id.clone(), delivery_attempt_id.clone()),
         )
         .await
         {
@@ -929,7 +932,7 @@ async fn release_delivery(
                     ?request_id,
                     "release delivery transport error; reconnecting"
                 );
-                if timeout_at(deadline, reconnect()).await.is_err() {
+                if timeout_at(deadline, rpc.reconnect()).await.is_err() {
                     return Err(anyhow::anyhow!("release delivery reconnect timed out"));
                 }
             }
@@ -950,10 +953,11 @@ async fn release_delivery(
 // ---------------------------------------------------------------------------
 
 async fn open_watch(
+    rpc: &RpcClient,
     request_id: Arc<str>,
 ) -> Result<Receiver<WorkRequestWatchEvent>, anyhow::Error> {
     let watch_id: u64 = rand::random();
-    let rx = RpcClient::work_request_wait(request_id, watch_id).await?;
+    let rx = rpc.work_request_wait(request_id, watch_id).await?;
     Ok(rx)
 }
 

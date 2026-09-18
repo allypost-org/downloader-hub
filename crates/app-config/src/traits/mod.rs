@@ -1,5 +1,5 @@
+pub mod boot_config;
 pub mod dumpable;
-pub mod global_config;
 
+pub use boot_config::*;
 pub use dumpable::*;
-pub use global_config::*;

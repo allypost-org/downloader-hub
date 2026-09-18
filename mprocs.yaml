@@ -1,7 +1,7 @@
 procs:
   db:
     cwd: ./crates/app-database
-    cmd: ["bun", "run", "dev"]
+    cmd: ["just", "db-dev"]
 
   central:
     cmd:

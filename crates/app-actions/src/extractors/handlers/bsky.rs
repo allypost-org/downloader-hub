@@ -8,6 +8,7 @@ use url::Url;
 
 use super::{ExtractInfoRequest, ExtractedInfo, Extractor, twitter::Twitter};
 use crate::{
+    ActionCtx,
     downloaders::handlers::{generic::Generic, yt_dlp::YtDlp},
     extractors::ExtractedUrlInfo,
 };
@@ -26,7 +27,11 @@ impl Extractor for Bsky {
         Self::is_post_url(&request.url)
     }
 
-    async fn extract_info(&self, request: &ExtractInfoRequest) -> Result<ExtractedInfo, String> {
+    async fn extract_info(
+        &self,
+        ctx: &ActionCtx,
+        request: &ExtractInfoRequest,
+    ) -> Result<ExtractedInfo, String> {
         let mut urls = match Self::get_bsky_media_urls(&request.url).await {
             Ok(urls) => urls,
             Err(e) => {
@@ -34,7 +39,7 @@ impl Extractor for Bsky {
             }
         };
 
-        urls.push(Twitter.screenshot_tweet_url_info(&request.url));
+        urls.push(Twitter.screenshot_tweet_url_info(ctx, &request.url));
 
         Ok(ExtractedInfo::from_urls(request, urls))
     }

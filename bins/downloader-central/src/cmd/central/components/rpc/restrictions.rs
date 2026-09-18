@@ -12,8 +12,6 @@ use arc_swap::ArcSwap;
 use futures::StreamExt;
 use tracing::warn;
 
-use super::restrictions;
-
 /// In-memory mirror of the `restrictions` table plus the token buckets for
 /// every active `Limit` rule. Lock-free reads via `ArcSwap`; the token-bucket
 /// state lives behind a `Mutex` held only for microseconds (no `await` inside).
@@ -72,7 +70,7 @@ impl RestrictionsManager {
 
     /// Check whether a request from `(user, place)` should be admitted.
     /// Consumes one token from every matching `Limit` bucket iff the result is
-    /// `Allow`; never consumes on a denial. Synchronous — no `await` inside.
+    /// `Allow`; never consumes on a denial. Synchronous - no `await` inside.
     #[must_use]
     pub fn check(
         &self,
@@ -188,11 +186,14 @@ fn matches_scope(
     user_ok && place_ok
 }
 
-pub async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let mgr = restrictions().expect("restrictions manager not initialized");
-    let mut stream = app_database::Database::global()
-        .restrictions_watch_all()
-        .await?;
+pub async fn run(
+    state: crate::cmd::central::components::state::SharedCentralState,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mgr = state
+        .restrictions
+        .load_full()
+        .expect("restrictions manager not initialized");
+    let mut stream = state.db().restrictions_watch_all().await?;
 
     tracing::debug!("Restrictions watcher started");
 

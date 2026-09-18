@@ -15,7 +15,7 @@ use tracing::{debug, trace};
 use super::{
     DownloadRequest, DownloadResult, Downloader, DownloaderError, DownloaderReturn, generic,
 };
-use crate::{config::ActionsConfig, downloaders::DownloaderOptions};
+use crate::{ActionCtx, downloaders::DownloaderOptions};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct YtDlp;
@@ -34,8 +34,8 @@ impl Downloader for YtDlp {
         true
     }
 
-    async fn download(&self, req: &DownloadRequest) -> DownloaderReturn {
-        match self.download_one(req).await {
+    async fn download(&self, ctx: &ActionCtx, req: &DownloadRequest) -> DownloaderReturn {
+        match self.download_one(ctx, req).await {
             Ok(x) => Ok(x),
             Err(e) if req.fallibility().can_fail() && !e.is_max_filesize() => {
                 Err(DownloaderError::FallibleFailed(e.original_message()))
@@ -49,9 +49,10 @@ impl YtDlp {
     #[allow(clippy::too_many_lines)]
     pub async fn download_one(
         &self,
+        ctx: &ActionCtx,
         request: &DownloadRequest,
     ) -> Result<DownloadResult, DownloaderError> {
-        let yt_dlp = ActionsConfig::dependency_paths().yt_dlp_path();
+        let yt_dlp = ctx.dependency_paths.yt_dlp_path();
         trace!("`yt-dlp' binary: {:?}", &yt_dlp);
         let temp_dir = TempDir::in_tmp_with_prefix("downloader-hub_yt-dlp-").map_err(|e| {
             DownloaderError::Error(format!(
@@ -166,9 +167,8 @@ impl YtDlp {
                         DownloaderError::Error("Failed to convert path to string".to_string())
                     })?,
                 ])
-                .args(["--user-agent", &ActionsConfig::request().user_agent])
+                .args(["--user-agent", &ctx.request.user_agent])
                 .args(["--no-simulate", "--print", "after_move:filepath"])
-                // .arg("--verbose")
                 .arg(request.url.url().as_str());
 
             cmd.stdin(Stdio::null())
@@ -199,7 +199,7 @@ impl YtDlp {
                 stderr,
                 status: _,
             }) if is_image_error(stderr.clone()) => {
-                return generic::Generic.download(request).await;
+                return generic::Generic.download(ctx, request).await;
             }
             _ => {
                 return Err(DownloaderError::Error(format!(

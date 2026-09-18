@@ -19,13 +19,14 @@ impl FileId {
         message.try_into().ok()
     }
 
-    #[tracing::instrument(name = "tg-download")]
-    pub async fn download(&self, download_dir: &Path) -> Result<PathBuf, String> {
+    #[tracing::instrument(name = "tg-download", skip(tg))]
+    pub async fn download(&self, tg: &TelegramBot, download_dir: &Path) -> Result<PathBuf, String> {
         debug!("Downloading file from telegram");
 
         let file_id = teloxide::types::FileId::from(self.0.clone());
 
-        let f = TelegramBot::bot()
+        let f = tg
+            .bot()
             .get_file(file_id.clone())
             .await
             .map_err(|e| format!("Error while getting file: {e:?}"))?;
@@ -47,7 +48,7 @@ impl FileId {
             .await
             .map_err(|e| format!("Error while creating file: {e:?}"))?;
 
-        TelegramBot::bot()
+        tg.bot()
             .download_file(&f.path, &mut file)
             .await
             .map_err(|e| format!("Error while downloading file: {e:?}"))?;

@@ -1,12 +1,11 @@
 use std::{
     collections::HashMap,
-    sync::{OnceLock, RwLock},
-    time::Duration,
+    sync::{Arc, RwLock},
 };
 
 use app_config::common::PeerCommsWorkerTicketFromApiConfig;
 use app_peer_comms::{
-    AccountPlaceRef, AccountUserRef, IrohEndpointAddr,
+    AccountPlaceRef, AccountUserRef, IrohEndpointAddr, PeeringEndpoint,
     message::v1::{
         central::{
             get_work_item_result::GetWorkItemResult,
@@ -16,22 +15,59 @@ use app_peer_comms::{
     },
     rpc::request::{Capabilities, HandlerEntry, SecretEntry},
 };
+use arc_swap::ArcSwapOption;
 use tracing::{debug, error, info, instrument};
 
-use crate::cmd::CmdResult;
+use crate::cmd::{CmdResult, work::rpc};
 
 pub(super) mod broadcaster;
 pub(super) mod helpers;
 pub(super) mod process;
 
-static HEARTBEAT: OnceLock<()> = OnceLock::new();
+#[derive(Clone, Default)]
+pub struct WorkerLoop {
+    pub rpc: Arc<ArcSwapOption<rpc::RpcClient>>,
+    secrets: Arc<RwLock<HashMap<String, SecretEntry>>>,
+}
 
-static SECRETS: OnceLock<RwLock<HashMap<String, SecretEntry>>> = OnceLock::new();
+impl WorkerLoop {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
 
-pub(super) fn set_secrets(secrets: Vec<SecretEntry>) {
-    let map = secrets.into_iter().map(|s| (s.name.clone(), s)).collect();
-    let lock = SECRETS.get_or_init(|| RwLock::new(HashMap::new()));
-    *lock.write().expect("secrets lock poisoned") = map;
+    pub fn set_rpc(&self, client: rpc::RpcClient) {
+        self.rpc.store(Some(Arc::new(client)));
+    }
+
+    #[must_use]
+    pub fn rpc(&self) -> Option<Arc<rpc::RpcClient>> {
+        self.rpc.load_full()
+    }
+
+    pub fn set_secrets(&self, secrets: Vec<SecretEntry>) {
+        let map = secrets.into_iter().map(|s| (s.name.clone(), s)).collect();
+        *self.secrets.write().expect("secrets lock poisoned") = map;
+    }
+
+    #[must_use]
+    pub fn secret_value_for(
+        &self,
+        url: &url::Url,
+        ordered_by: Option<&AccountUserRef>,
+        ordered_in: Option<&AccountPlaceRef>,
+    ) -> Option<String> {
+        let name = platform_secret_name(url.host_str()?)?;
+        let guard = self.secrets.read().ok()?;
+        let entry = guard.get(name)?;
+        let user_ok = entry.allowed_users.is_empty()
+            || ordered_by.is_some_and(|user| entry.allowed_users.contains(user));
+        let place_ok = entry.allowed_places.is_empty()
+            || ordered_in.is_some_and(|place| entry.allowed_places.contains(place));
+        let value = (user_ok && place_ok).then(|| entry.value.clone());
+        drop(guard);
+        value
+    }
 }
 
 fn platform_secret_name(host: &str) -> Option<&'static str> {
@@ -41,46 +77,33 @@ fn platform_secret_name(host: &str) -> Option<&'static str> {
     }
 }
 
-#[must_use]
-pub fn secret_value_for(
-    url: &url::Url,
-    ordered_by: Option<&AccountUserRef>,
-    ordered_in: Option<&AccountPlaceRef>,
-) -> Option<String> {
-    let name = platform_secret_name(url.host_str()?)?;
-    let guard = SECRETS.get()?.read().ok()?;
-    let entry = guard.get(name)?;
-    let user_ok = entry.allowed_users.is_empty()
-        || ordered_by.is_some_and(|user| entry.allowed_users.contains(user));
-    let place_ok = entry.allowed_places.is_empty()
-        || ordered_in.is_some_and(|place| entry.allowed_places.contains(place));
-    let value = (user_ok && place_ok).then(|| entry.value.clone());
-    drop(guard);
-    value
-}
-
 #[instrument(name = "worker", skip_all)]
 pub async fn run(
+    actions: Arc<app_actions::Actions>,
+    peering: Arc<PeeringEndpoint>,
+    loop_state: WorkerLoop,
     config: PeerCommsWorkerTicketFromApiConfig,
     central_addr: IrohEndpointAddr,
 ) -> CmdResult {
     let capabilities = Capabilities::Worker {
-        extractors: app_actions::extractors::AVAILABLE_EXTRACTORS
-            .iter()
-            .filter(|e| e.is_enabled())
+        extractors: actions
+            .enabled_extractors()
             .map(|e| HandlerEntry {
                 name: e.name().to_string(),
                 description: e.description().to_string(),
             })
             .collect(),
-        downloaders: app_actions::downloaders::AVAILABLE_DOWNLOADERS
+        downloaders: actions
+            .enabled_downloaders()
             .iter()
             .map(|d| HandlerEntry {
                 name: d.name().to_string(),
                 description: d.description().to_string(),
             })
             .collect(),
-        fixers: app_actions::fixers::AVAILABLE_FIXERS
+        fixers: actions
+            .enabled_fixers()
+            .await
             .iter()
             .map(|f| HandlerEntry {
                 name: f.name().to_string(),
@@ -89,26 +112,27 @@ pub async fn run(
             .collect(),
     };
 
-    crate::cmd::work::rpc::RpcClient::init(config.key.clone(), central_addr, capabilities).await?;
+    let rpc = rpc::RpcClient::connect(
+        peering.as_ref(),
+        config.key.clone(),
+        central_addr,
+        capabilities,
+    )
+    .await?;
+    loop_state.set_rpc(rpc);
 
-    broadcaster::Broadcaster::init();
+    let broadcaster = broadcaster::Broadcaster::new(loop_state.rpc.clone());
 
-    refresh_dynamic_settings().await;
-
-    HEARTBEAT.get_or_init(|| {
-        tokio::spawn(async {
-            loop {
-                let jitter = rand::random_range(0..5_000u64);
-                tokio::time::sleep(Duration::from_millis(30_000 + jitter)).await;
-                refresh_dynamic_settings().await;
-            }
-        });
-    });
+    refresh_dynamic_settings(&loop_state).await;
 
     info!("Connected to central (irpc); waiting for work via getWorkItem");
 
+    let Some(rpc) = loop_state.rpc() else {
+        return Err("RPC client not connected".into());
+    };
+
     loop {
-        let work_request = match crate::cmd::work::rpc::RpcClient::get_work_item().await {
+        let work_request = match rpc.get_work_item().await {
             Ok(GetWorkItemResult::Ok(item)) => *item,
             Ok(GetWorkItemResult::BackendError) => {
                 error!("central reported a backend error on getWorkItem");
@@ -127,26 +151,35 @@ pub async fn run(
             }
         };
 
-        if can_process(&work_request).await {
+        if can_process(&actions, &work_request).await {
             debug!(id = %work_request.request_id(), "Processing work item");
-            process::process_work_request(work_request).await;
+            process::process_work_request(
+                actions.clone(),
+                peering.clone(),
+                broadcaster.clone(),
+                loop_state.clone(),
+                work_request,
+            )
+            .await;
         } else {
             debug!(id = %work_request.request_id(), "Cannot process work item; refusing");
-            if let Err(e) =
-                crate::cmd::work::rpc::RpcClient::refuse_work_item(work_request.request_id()).await
-            {
+            if let Err(e) = rpc.refuse_work_item(work_request.request_id()).await {
                 error!(?e, "refuse_work_item failed");
             }
         }
     }
 }
 
-async fn refresh_dynamic_settings() {
-    if crate::cmd::work::rpc::RpcClient::heartbeat().await.is_err() {
+pub(super) async fn refresh_dynamic_settings(loop_state: &WorkerLoop) {
+    let Some(rpc) = loop_state.rpc() else {
+        debug!("skipping dynamic settings refresh; RPC client not connected");
+        return;
+    };
+    if rpc.heartbeat().await.is_err() {
         debug!("heartbeat failed");
         return;
     }
-    match crate::cmd::work::rpc::RpcClient::get_log_settings().await {
+    match rpc.get_log_settings().await {
         Ok(app_peer_comms::rpc::request::LogSettingsResult::Ok(settings)) => {
             let settings = app_logger::LogFilterSettings {
                 console: settings.console,
@@ -159,25 +192,28 @@ async fn refresh_dynamic_settings() {
         Ok(result) => debug!(?result, "central did not return log settings"),
         Err(e) => debug!(?e, "log settings request failed"),
     }
-    match crate::cmd::work::rpc::RpcClient::get_secrets().await {
+    match rpc.get_secrets().await {
         Ok(app_peer_comms::rpc::request::SecretsResult::Ok(entries)) => {
-            set_secrets(entries);
+            loop_state.set_secrets(entries);
         }
         Ok(result) => debug!(?result, "central did not return secrets"),
         Err(e) => debug!(?e, "secrets request failed"),
     }
 }
 
-async fn can_process(work_request: &WorkRequest) -> bool {
+async fn can_process(actions: &app_actions::Actions, work_request: &WorkRequest) -> bool {
     match &work_request.info {
         WorkRequestInfo::DownloadAndFix(file_reference) => {
-            can_process_download_and_fix(file_reference).await
+            can_process_download_and_fix(actions, file_reference).await
         }
         WorkRequestInfo::RefreshAccountInfo(_) => false,
     }
 }
 
-async fn can_process_download_and_fix(file_reference: &FileReference) -> bool {
+async fn can_process_download_and_fix(
+    actions: &app_actions::Actions,
+    file_reference: &FileReference,
+) -> bool {
     match file_reference {
         FileReference::BlobTicket(_) => true,
         FileReference::Url(url) => {
@@ -186,7 +222,7 @@ async fn can_process_download_and_fix(file_reference: &FileReference) -> bool {
             else {
                 return false;
             };
-            req.first_available_extractor().await.is_some()
+            actions.first_available_extractor(&req).await.is_some()
         }
     }
 }

@@ -19,7 +19,7 @@ export function MetricsPage() {
         {metrics.isError ? (
           <p className="text-muted-foreground">Central metrics unavailable.</p>
         ) : metrics.isLoading ? (
-          <p className="text-muted-foreground">Loading…</p>
+          <p className="text-muted-foreground">Loading&hellip;</p>
         ) : (
           <pre className="max-h-[70vh] overflow-auto rounded-md bg-muted p-3 text-xs leading-relaxed">
             {metrics.data}

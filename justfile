@@ -1,11 +1,19 @@
 set dotenv-load
 set positional-arguments
 
+# rustup's cargo must win over a distro cargo: only it honours
+# rust-toolchain.toml and has the pinned musl std. Prepending is safe even
+# when rustup isn't installed - the dir just falls out of PATH lookup.
+#
+cargo_bin := env('CARGO_HOME', env('HOME', '') + '/.cargo') + '/bin'
+export PATH := cargo_bin + ':' + env('PATH')
+
 default:
     @just --list
 
 run package *args:
     APPLICATION_NAME='{{ package }}' \
+    CARGO_TARGET_DIR='target/{{ package }}' \
     cargo run \
         --release \
         --bin '{{ package }}' \
@@ -15,6 +23,7 @@ build-all: (build "downloader-cli") (build "downloader-central") (build "downloa
 
 build bin:
     APPLICATION_NAME='{{ bin }}' \
+    CARGO_TARGET_DIR='target/{{ bin }}' \
     cargo build \
         --release \
         --bin '{{ bin }}' \
@@ -23,6 +32,7 @@ build bin:
 dev-run package *args:
     shift; \
     APPLICATION_NAME='{{ package }}' \
+    CARGO_TARGET_DIR='target/{{ package }}' \
     cargo run \
         --package '{{ package }}' \
         -- "$@" \
@@ -30,6 +40,7 @@ dev-run package *args:
 dev-build package *args:
     shift; \
     APPLICATION_NAME='{{ package }}' \
+    CARGO_TARGET_DIR='target/{{ package }}' \
     cargo build \
         --profile dev \
         --package '{{ package }}' \
@@ -55,6 +66,7 @@ _watch *args:
 
 db-dev:
     cd ./crates/app-database \
+    && bun install \
     && bun run dev \
 
 db-codegen:

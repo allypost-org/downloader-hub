@@ -10,11 +10,9 @@ mod common;
 pub mod handlers;
 mod helpers;
 
-pub use handlers::AVAILABLE_DOWNLOADERS;
+use app_config::{EntryCategory, EntryId};
+pub use handlers::ALL_DOWNLOADERS;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info};
-
-use crate::config::ActionsConfig;
 
 #[async_trait::async_trait]
 #[typetag::serde(tag = "$downloader")]
@@ -23,15 +21,21 @@ pub trait Downloader: Debug + Send + Sync {
         self.typetag_name()
     }
 
-    fn description(&self) -> &'static str;
-
-    fn is_enabled(&self) -> bool {
-        ActionsConfig::global().is_enabled(("downloader", self.name()))
+    fn entry_id(&self) -> EntryId {
+        EntryId::new(EntryCategory::Downloader, self.name())
     }
+
+    fn description(&self) -> &'static str;
 
     async fn can_download(&self, request: &DownloadRequest) -> bool;
 
-    async fn download(&self, req: &DownloadRequest) -> DownloaderReturn;
+    async fn download(&self, ctx: &crate::ActionCtx, req: &DownloadRequest) -> DownloaderReturn;
+}
+
+impl app_config::AsEntryId for dyn Downloader {
+    fn entry_id(&self) -> EntryId {
+        Downloader::entry_id(self)
+    }
 }
 
 pub type DownloaderReturn = Result<DownloadResult, DownloaderError>;
@@ -68,17 +72,8 @@ impl DownloaderError {
     }
 }
 
-pub async fn download_file(file: &DownloadRequest) -> DownloaderReturn {
-    info!(?file, "Downloading file");
-
-    let new_file_paths = download_file_with(&AVAILABLE_DOWNLOADERS, file).await;
-
-    debug!("Downloaded files: {:?}", &new_file_paths);
-
-    new_file_paths
-}
-
 pub async fn download_file_with(
+    ctx: &crate::ActionCtx,
     downloaders: &[DownloaderEntry],
     request: &DownloadRequest,
 ) -> DownloaderReturn {
@@ -89,7 +84,7 @@ pub async fn download_file_with(
         ))
     })?;
 
-    downloader.download(request).await
+    downloader.download(ctx, request).await
 }
 
 async fn find_downloader(

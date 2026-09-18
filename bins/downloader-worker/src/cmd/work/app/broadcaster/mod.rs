@@ -1,10 +1,7 @@
-use std::{
-    future::Future,
-    sync::{Arc, OnceLock},
-    time::Duration,
-};
+use std::{future::Future, sync::Arc, time::Duration};
 
 use app_peer_comms::{irpc, message::v1::common::file::FileReference};
+use arc_swap::ArcSwapOption;
 use tokio::spawn;
 use tracing::{debug, error, warn};
 
@@ -21,44 +18,63 @@ const RETRY_DELAYS: &[Duration] = &[
     Duration::from_secs(30),
 ];
 
-pub struct Broadcaster;
-
-static BROADCASTER: OnceLock<Broadcaster> = OnceLock::new();
+#[derive(Clone)]
+pub struct Broadcaster {
+    rpc: Arc<ArcSwapOption<RpcClient>>,
+}
 
 impl Broadcaster {
-    pub fn init() {
-        _ = BROADCASTER.set(Self);
-    }
-
     #[must_use]
-    pub fn get() -> &'static Self {
-        BROADCASTER.get().expect("Broadcaster not initialized")
+    pub const fn new(rpc: Arc<ArcSwapOption<RpcClient>>) -> Self {
+        Self { rpc }
     }
 }
 
-#[allow(clippy::unused_self)]
 impl Broadcaster {
     pub fn send_work_request_free(&self, request_id: Arc<str>) {
+        let rpc = self.rpc.clone();
         spawn(deliver("work_request_free", move || {
             let id = request_id.clone();
-            async move { RpcClient::work_request_free(id).await.map(drop) }
+            let client = rpc.load_full();
+            async move {
+                let Some(client) = client else {
+                    error!("work_request_free dropped: RPC client not connected");
+                    return Ok(());
+                };
+                client.work_request_free(id).await.map(drop)
+            }
         }));
     }
 
     pub fn send_work_request_refuse(&self, request_id: Arc<str>) {
+        let rpc = self.rpc.clone();
         spawn(deliver("work_request_refuse", move || {
             let id = request_id.clone();
-            async move { RpcClient::refuse_work_item(id).await.map(drop) }
+            let client = rpc.load_full();
+            async move {
+                let Some(client) = client else {
+                    error!("work_request_refuse dropped: RPC client not connected");
+                    return Ok(());
+                };
+                client.refuse_work_item(id).await.map(drop)
+            }
         }));
     }
 
     pub fn send_work_request_update_status_message(&self, request_id: Arc<str>, message: &str) {
         let message: Arc<str> = Arc::from(message);
+        let rpc = self.rpc.clone();
         spawn(deliver("work_request_update_status", move || {
             let id = request_id.clone();
             let msg = message.clone();
+            let client = rpc.load_full();
             async move {
-                RpcClient::work_request_update_status_message(id, msg)
+                let Some(client) = client else {
+                    error!("work_request_update_status dropped: RPC client not connected");
+                    return Ok(());
+                };
+                client
+                    .work_request_update_status_message(id, msg)
                     .await
                     .map(drop)
             }
@@ -66,10 +82,18 @@ impl Broadcaster {
     }
 
     pub fn send_work_request_add_errors(&self, request_id: Arc<str>, errors: Vec<String>) {
+        let rpc = self.rpc.clone();
         spawn(deliver("work_request_add_errors", move || {
             let id = request_id.clone();
             let errs = errors.clone();
-            async move { RpcClient::work_request_add_errors(id, errs).await.map(drop) }
+            let client = rpc.load_full();
+            async move {
+                let Some(client) = client else {
+                    error!("work_request_add_errors dropped: RPC client not connected");
+                    return Ok(());
+                };
+                client.work_request_add_errors(id, errs).await.map(drop)
+            }
         }));
     }
 
@@ -78,11 +102,18 @@ impl Broadcaster {
         request_id: Arc<str>,
         files_data: Vec<FileReference>,
     ) {
+        let rpc = self.rpc.clone();
         spawn(deliver("work_request_move_to_waiting", move || {
             let id = request_id.clone();
             let files = files_data.clone();
+            let client = rpc.load_full();
             async move {
-                RpcClient::work_request_move_to_waiting_for_requester(id, files)
+                let Some(client) = client else {
+                    error!("work_request_move_to_waiting dropped: RPC client not connected");
+                    return Ok(());
+                };
+                client
+                    .work_request_move_to_waiting_for_requester(id, files)
                     .await
                     .map(drop)
             }
@@ -91,10 +122,18 @@ impl Broadcaster {
 
     pub fn send_work_request_fail(&self, request_id: Arc<str>, reason: &str) {
         let reason: Arc<str> = Arc::from(reason);
+        let rpc = self.rpc.clone();
         spawn(deliver("work_request_fail", move || {
             let id = request_id.clone();
             let r = reason.clone();
-            async move { RpcClient::work_request_fail(id, r).await.map(drop) }
+            let client = rpc.load_full();
+            async move {
+                let Some(client) = client else {
+                    error!("work_request_fail dropped: RPC client not connected");
+                    return Ok(());
+                };
+                client.work_request_fail(id, r).await.map(drop)
+            }
         }));
     }
 }

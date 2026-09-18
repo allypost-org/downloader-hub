@@ -3,7 +3,7 @@ use http::{HeaderMap, HeaderName, HeaderValue, Method, header};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use crate::config::ActionsConfig;
+use crate::ActionCtx;
 
 #[derive(derive_more::Debug, Clone, Serialize, Deserialize)]
 pub struct ExtractInfoRequest {
@@ -65,7 +65,7 @@ impl ExtractInfoRequest {
 }
 
 impl ExtractInfoRequest {
-    pub fn as_request_builder(&self) -> Result<RequestBuilder, String> {
+    pub fn as_request_builder(&self, ctx: &ActionCtx) -> Result<RequestBuilder, String> {
         let mut builder = Client::base()?.request(
             self.method
                 .as_str()
@@ -79,10 +79,7 @@ impl ExtractInfoRequest {
         }
 
         if !self.headers.contains_key(header::USER_AGENT) {
-            builder = builder.header(
-                header::USER_AGENT,
-                ActionsConfig::request().user_agent.as_str(),
-            );
+            builder = builder.header(header::USER_AGENT, ctx.request.user_agent.as_str());
         }
 
         if !self.headers.contains_key(header::ACCEPT) {

@@ -205,7 +205,7 @@ function RestrictionEditor({
         <RestrictionRuleFields f={f} set={set} readonly={readonly} />
         {error && <p className="text-sm text-destructive">{error}</p>}
         <Button disabled={readonly || save.isPending} onClick={() => save.mutate()}>
-          {save.isPending ? "Saving…" : "Save"}
+          {save.isPending ? "Saving\u2026" : "Save"}
         </Button>
       </CardContent>
     </Card>
@@ -359,7 +359,7 @@ export function RestrictionsPage() {
             disabled={readonly || create.isPending}
             onClick={() => create.mutate()}
           >
-            {create.isPending ? "Creating…" : "Create"}
+            {create.isPending ? "Creating\u2026" : "Create"}
           </Button>
         </CardContent>
       </Card>
@@ -386,7 +386,7 @@ export function RestrictionsPage() {
           <div className={selected ? "grid gap-4 lg:grid-cols-[1fr_360px]" : ""}>
             <div>
               {bans.isLoading || limits.isLoading ? (
-                <p className="text-muted-foreground">Loading…</p>
+                <p className="text-muted-foreground">Loading&hellip;</p>
               ) : (
                 <DataTable
                   columns={columns}

@@ -1,3 +1,4 @@
+use app_config::BootConfig;
 use tracing::{Level, debug, trace};
 
 #[global_allocator]
@@ -42,7 +43,7 @@ fn main() {
         }
     }
 
-    trace!(config = ?*config, "Running with config");
+    trace!(config = ?config, "Running with config");
     debug!(
         app_name = config::Config::app_name_with_version(),
         app_version = config::Config::app_version(),
@@ -51,5 +52,5 @@ fn main() {
         "Build info"
     );
 
-    cmd::run(config.cmd.clone());
+    cmd::run(config.cmd);
 }

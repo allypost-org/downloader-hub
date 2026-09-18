@@ -1,9 +1,11 @@
 use std::{
     path::{Path, PathBuf},
     process::Stdio,
+    sync::Arc,
 };
 
 use anyhow::anyhow;
+use app_config::common::ProjectConfig;
 use app_helpers::{
     ffprobe::{self, FfProbeResult, Stream},
     id::time_thread_id,
@@ -18,7 +20,7 @@ use tokio::{fs, process::Command};
 use tracing::{debug, error, trace};
 
 use crate::{
-    config::ActionsConfig,
+    ActionCtx,
     fixers::{
         Fixer, FixerReturn, IntoFixerReturn,
         common::{FixRequest, FixResult, FixerError},
@@ -35,18 +37,17 @@ impl Fixer for MediaFormats {
         "Re-encode files to match more standard formats (eg. webm -> mp4)."
     }
 
-    /// Options:
-    ///
-    async fn run(&self, request: &FixRequest) -> FixerReturn {
-        convert_into_preferred_formats(request.clone()).await
+    async fn run(&self, ctx: &ActionCtx, request: &FixRequest) -> FixerReturn {
+        let ctx = Arc::new(ctx.clone());
+        convert_into_preferred_formats(ctx, request.clone()).await
     }
 }
 
-async fn convert_into_preferred_formats(request: FixRequest) -> FixerReturn {
+async fn convert_into_preferred_formats(ctx: Arc<ActionCtx>, request: FixRequest) -> FixerReturn {
     let file_path = request.file_path.clone();
     debug!("Checking if {file_path:?} has unwanted formats");
 
-    check_and_fix_file(&file_path)
+    check_and_fix_file(&ctx, &file_path)
         .await
         .map(|p| {
             debug!("File {file_path:?} done being converted");
@@ -55,8 +56,11 @@ async fn convert_into_preferred_formats(request: FixRequest) -> FixerReturn {
         .map_err(FixerError::failed_fix)
 }
 
-async fn check_and_fix_file(file_path: &Path) -> Result<PathBuf, MediaFormatsError> {
-    let file_format_info = ffprobe::ffprobe_async(file_path).await?;
+async fn check_and_fix_file(
+    ctx: &Arc<ActionCtx>,
+    file_path: &Path,
+) -> Result<PathBuf, MediaFormatsError> {
+    let file_format_info = ffprobe::ffprobe_async(&ctx.dependency_paths, file_path).await?;
 
     trace!(
         "File format info: {file_format_info:?}",
@@ -98,7 +102,7 @@ async fn check_and_fix_file(file_path: &Path) -> Result<PathBuf, MediaFormatsErr
 
     if let Some(handler) = handler {
         trace!("Using handler: {handler:?}", handler = handler);
-        return (handler.handle)(file_format_info, file_media_stream)
+        return (handler.handle)(ctx.clone(), file_format_info, file_media_stream)
             .await
             .map_err(MediaFormatsError::CodecFix);
     }
@@ -144,8 +148,6 @@ impl TranscodeInfo {
         self
     }
 
-    // Default codecs
-
     fn mp3() -> Self {
         Self::new("mp3").with_audio_codec("mp3")
     }
@@ -171,6 +173,7 @@ impl TranscodeInfo {
 }
 
 async fn transcode_media_into(
+    ctx: Arc<ActionCtx>,
     from_path: &Path,
     to_format: &TranscodeInfo,
 ) -> anyhow::Result<PathBuf> {
@@ -179,7 +182,7 @@ async fn transcode_media_into(
     let to_extension = to_format.extension;
 
     let cache_folder = TempDir::absolute(
-        ActionsConfig::cache_dir().join(format!("transcode-{}", time_thread_id())),
+        ProjectConfig::cache_dir().join(format!("transcode-{}", time_thread_id())),
     )
     .map_err(|e| anyhow!("Failed to create temporary directory: {e:?}"))?;
 
@@ -208,7 +211,7 @@ async fn transcode_media_into(
         to = cache_to_path.file_name(),
     );
 
-    let ffmpeg_path = ActionsConfig::dependency_paths().ffmpeg_path();
+    let ffmpeg_path = ctx.dependency_paths.ffmpeg_path();
     trace!("`ffmpeg' binary: {ffmpeg_path:?}");
     let mut cmd = Command::new(ffmpeg_path);
     let mut cmd = cmd
@@ -331,13 +334,14 @@ fn get_stream_of_type<'a>(
 #[derive(Debug, Clone)]
 struct CodecHandler {
     pub can_handle: fn(&str, &Stream) -> bool,
-    pub handle: fn(FfProbeResult, Stream) -> BoxFuture<'static, anyhow::Result<PathBuf>>,
+    pub handle:
+        fn(Arc<ActionCtx>, FfProbeResult, Stream) -> BoxFuture<'static, anyhow::Result<PathBuf>>,
 }
 
 const CODEC_HANDLERS: &[CodecHandler] = &[
     CodecHandler {
         can_handle: |codec, _stream| matches!(codec, "mp3"),
-        handle: |file_format_info, _matched_stream| {
+        handle: |_ctx, file_format_info, _matched_stream| {
             Box::pin(async move {
                 let from_path = PathBuf::from(file_format_info.format.filename.clone());
 
@@ -354,16 +358,16 @@ const CODEC_HANDLERS: &[CodecHandler] = &[
         can_handle: |codec, stream| {
             matches!(stream.codec_type.as_deref(), Some("audio")) && !matches!(codec, "mp3")
         },
-        handle: |file_format_info, _matched_stream| {
+        handle: |ctx, file_format_info, _matched_stream| {
             Box::pin(async move {
                 let file_path = PathBuf::from(file_format_info.format.filename.clone());
-                transcode_media_into(&file_path, &TranscodeInfo::mp3()).await
+                transcode_media_into(ctx, &file_path, &TranscodeInfo::mp3()).await
             })
         },
     },
     CodecHandler {
         can_handle: |codec, _stream| matches!(codec, "h264"),
-        handle: |file_format_info, video_stream| {
+        handle: |ctx, file_format_info, video_stream| {
             Box::pin(async move {
                 let file_path = PathBuf::from(file_format_info.format.filename.clone());
 
@@ -399,23 +403,23 @@ const CODEC_HANDLERS: &[CodecHandler] = &[
                     return Ok(file_path);
                 }
 
-                transcode_media_into(&file_path, &TranscodeInfo::mp4()).await
+                transcode_media_into(ctx, &file_path, &TranscodeInfo::mp4()).await
             })
         },
     },
     CodecHandler {
         can_handle: |codec, _stream| matches!(codec, "mpeg4" | "vp8" | "vp9" | "av1" | "hevc"),
-        handle: |file_format_info, _matched_stream| {
+        handle: |ctx, file_format_info, _matched_stream| {
             Box::pin(async move {
                 let from_path = PathBuf::from(file_format_info.format.filename.clone());
                 trace!("Converting {path:?} into mp4", path = from_path);
-                transcode_media_into(&from_path, &TranscodeInfo::mp4()).await
+                transcode_media_into(ctx, &from_path, &TranscodeInfo::mp4()).await
             })
         },
     },
     CodecHandler {
         can_handle: |codec, _stream| matches!(codec, "png" | "mjpeg" | "gif"),
-        handle: |file_format_info, _matched_stream| {
+        handle: |_ctx, file_format_info, _matched_stream| {
             Box::pin(async move {
                 let from_path = PathBuf::from(file_format_info.format.filename.clone());
 
@@ -430,7 +434,7 @@ const CODEC_HANDLERS: &[CodecHandler] = &[
     },
     CodecHandler {
         can_handle: |codec, _stream| matches!(codec, "webp"),
-        handle: |file_format_info, _matched_stream| {
+        handle: |ctx, file_format_info, _matched_stream| {
             Box::pin(async move {
                 let from_path = PathBuf::from(file_format_info.format.filename.clone());
                 let img = image::open(&from_path)?;
@@ -439,11 +443,11 @@ const CODEC_HANDLERS: &[CodecHandler] = &[
                 match color {
                     ColorType::Rgb8 | ColorType::Rgb16 | ColorType::Rgb32F => {
                         trace!("Converting {path:?} into jpg", path = from_path);
-                        transcode_media_into(&from_path, &TranscodeInfo::jpg()).await
+                        transcode_media_into(ctx, &from_path, &TranscodeInfo::jpg()).await
                     }
                     ColorType::Rgba8 | ColorType::Rgba16 | ColorType::Rgba32F => {
                         trace!("Converting {path:?} into png", path = from_path);
-                        transcode_media_into(&from_path, &TranscodeInfo::png()).await
+                        transcode_media_into(ctx, &from_path, &TranscodeInfo::png()).await
                     }
 
                     color_type => {

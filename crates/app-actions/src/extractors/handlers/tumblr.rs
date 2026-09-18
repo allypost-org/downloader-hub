@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use super::{ExtractInfoRequest, ExtractedInfo, Extractor, twitter::Twitter};
-use crate::{downloaders::handlers::generic::Generic, extractors::ExtractedUrlInfo};
+use crate::{ActionCtx, downloaders::handlers::generic::Generic, extractors::ExtractedUrlInfo};
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Tumblr;
@@ -22,9 +22,15 @@ impl Extractor for Tumblr {
         Self::is_post_url(&request.url)
     }
 
-    async fn extract_info(&self, request: &ExtractInfoRequest) -> Result<ExtractedInfo, String> {
-        let mut info =
-            ExtractedInfo::from_url(request, Twitter.screenshot_tweet_url_info(&request.url));
+    async fn extract_info(
+        &self,
+        ctx: &ActionCtx,
+        request: &ExtractInfoRequest,
+    ) -> Result<ExtractedInfo, String> {
+        let mut info = ExtractedInfo::from_url(
+            request,
+            Twitter.screenshot_tweet_url_info(ctx, &request.url),
+        );
 
         if let Ok(post_media) = Self::fetch_post_media(&request.url).await {
             info = info.with_urls(post_media);

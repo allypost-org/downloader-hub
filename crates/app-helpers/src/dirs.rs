@@ -1,10 +1,12 @@
 use std::{fs, path::PathBuf};
 
-use crate::{config::HelpersConfig, id::time_thread_id};
+use app_config::common::ProjectConfig;
+
+use crate::id::time_thread_id;
 
 pub fn create_temp_dir() -> anyhow::Result<PathBuf> {
     let id = time_thread_id();
-    let temp_dir = HelpersConfig::cache_dir().join(id);
+    let temp_dir = ProjectConfig::cache_dir().join(id);
 
     fs::create_dir_all(&temp_dir)?;
 

@@ -1,14 +1,10 @@
-use std::sync::Arc;
-
+use app_config::{EntryCategory, EntryId};
 pub use common::{
     extract_info_request::ExtractInfoRequest,
     extracted_info::{ExtractedInfo, ExtractedUrlInfo},
 };
-use futures::{FutureExt, StreamExt};
-pub use handlers::AVAILABLE_EXTRACTORS;
+pub use handlers::ALL_EXTRACTORS;
 use tracing::trace;
-
-use crate::config::ActionsConfig;
 
 mod common;
 pub mod handlers;
@@ -20,74 +16,37 @@ pub trait Extractor: std::fmt::Debug {
         self.typetag_name()
     }
 
-    fn description(&self) -> &'static str;
-
-    fn is_enabled(&self) -> bool {
-        ActionsConfig::global().is_enabled(("extractor", self.name()))
+    fn entry_id(&self) -> EntryId {
+        EntryId::new(EntryCategory::Extractor, self.name())
     }
+
+    fn description(&self) -> &'static str;
 
     async fn can_handle(&self, request: &ExtractInfoRequest) -> bool;
 
-    async fn extract_info(&self, request: &ExtractInfoRequest) -> Result<ExtractedInfo, String>;
-}
-
-impl ExtractInfoRequest {
-    pub fn extractors(&self) -> impl futures::Stream<Item = (bool, handlers::ExtractorEntry)> {
-        let req = Arc::new(self.clone());
-
-        futures::stream::iter(AVAILABLE_EXTRACTORS.iter().cloned())
-            .map(move |ex| {
-                let req = req.clone();
-                let ex = ex.clone();
-                Box::pin(async move { (ex.can_handle(&req).await, ex) }.into_stream())
-            })
-            .flatten()
-    }
-
-    pub fn available_extractors(&self) -> impl futures::Stream<Item = handlers::ExtractorEntry> {
-        self.extractors()
-            .filter(|(can_handle, extractor)| {
-                futures::future::ready(*can_handle && extractor.is_enabled())
-            })
-            .map(|(_, extractor)| extractor)
-    }
-
-    pub async fn first_available_extractor(&self) -> Option<handlers::ExtractorEntry> {
-        self.available_extractors().next().await
-    }
-
-    pub async fn extract_info(&self) -> Result<ExtractedInfo, String> {
-        extract_info(self).await
-    }
-
-    pub async fn extract_info_with(
+    async fn extract_info(
         &self,
-        extractor: handlers::ExtractorEntry,
-    ) -> Result<ExtractedInfo, String> {
-        extract_info_with(self, extractor).await
-    }
+        ctx: &crate::ActionCtx,
+        request: &ExtractInfoRequest,
+    ) -> Result<ExtractedInfo, String>;
 }
 
-pub async fn extract_info(request: &ExtractInfoRequest) -> Result<ExtractedInfo, String> {
-    let extractor = request
-        .first_available_extractor()
-        .await
-        .ok_or_else(|| "No extractor found".to_string())?;
-
-    trace!(?extractor, "Found extractor");
-
-    extract_info_with(request, extractor).await
+impl app_config::AsEntryId for dyn Extractor + Sync + Send {
+    fn entry_id(&self) -> EntryId {
+        Extractor::entry_id(self)
+    }
 }
 
 #[tracing::instrument(skip_all, fields(extractor = %extractor.name()))]
 pub async fn extract_info_with(
+    ctx: &crate::ActionCtx,
     request: &ExtractInfoRequest,
     extractor: handlers::ExtractorEntry,
 ) -> Result<ExtractedInfo, String> {
     trace!("Extracting info");
 
     let info = extractor
-        .extract_info(request)
+        .extract_info(ctx, request)
         .await?
         .with_meta(
             "extractor",

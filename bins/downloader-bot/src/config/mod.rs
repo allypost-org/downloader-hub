@@ -1,9 +1,8 @@
 use std::path::PathBuf;
 
 use app_config::{
-    BUILD_DATE, BUILD_RUSTC_VERSION, Dumpable, GlobalConfig, LogFormat,
+    BUILD_DATE, BUILD_RUSTC_VERSION, BootConfig, Dumpable, LogFormat,
     common::{APPLICATION_NAME, PeerCommsBotConfig, ProgramPathConfig},
-    validators::print_validation_errors,
 };
 use clap::Parser;
 use const_format::concatcp;
@@ -16,7 +15,7 @@ pub static APPLICATION_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub static APPLICATION_NAME_WITH_VERSION: &str =
     concatcp!(APPLICATION_NAME, " v", APPLICATION_VERSION);
 
-#[derive(Debug, Clone, Serialize, Deserialize, Parser, Validate, GlobalConfig, Dumpable)]
+#[derive(Debug, Clone, Serialize, Deserialize, Parser, Validate, Dumpable)]
 pub struct Config {
     /// If set, the log will be written to this file as well as stdout
     #[clap(long, env = "DOWNLOADER_HUB_BOT_LOG_FILE")]
@@ -53,33 +52,14 @@ pub struct Config {
     dump: DumpConfig,
 }
 
-impl Config {
-    pub fn init_parsed() -> Result<&'static Self, String> {
-        let parsed = Self::parse()
-            .resolve_paths()
-            .validate_or_exit()
-            .dump_if_needed();
-
-        Self::init(parsed)
-    }
-
-    #[inline]
+impl BootConfig for Config {
     fn resolve_paths(mut self) -> Self {
         self.dependency_paths = self.dependency_paths.resolve_paths();
         self
     }
+}
 
-    #[inline]
-    fn validate_or_exit(self) -> Self {
-        if let Err(e) = self.validate() {
-            eprintln!("Errors validating configuration:");
-            print_validation_errors(&e, "  ", 1);
-            std::process::exit(1);
-        }
-
-        self
-    }
-
+impl Config {
     pub const fn build_date() -> &'static str {
         BUILD_DATE
     }

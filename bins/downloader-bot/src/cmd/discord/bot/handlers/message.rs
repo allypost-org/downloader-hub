@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use app_helpers::ip::url_resolves_to_valid_ip;
 use app_peer_comms::message::v1::{
     central::create_result::CreateResult,
@@ -24,13 +26,21 @@ use crate::{
     peering::rpc::RpcClient,
 };
 
-#[tracing::instrument(name = "discord-download", skip(ctx, msg, urls))]
+#[tracing::instrument(name = "discord-download", skip(ctx, msg, bot, rpc, urls))]
 #[allow(clippy::too_many_lines)]
-pub async fn handle_download_request(ctx: &Context, msg: &Message, mut urls: Vec<Url>) {
+pub async fn handle_download_request(
+    ctx: &Context,
+    msg: &Message,
+    bot: &Arc<DiscordBot>,
+    rpc: &Arc<RpcClient>,
+    mut urls: Vec<Url>,
+) {
     info!(url_count = urls.len(), "Adding download request to queue");
 
-    let max_filesize = effective_max_filesize(ctx, msg).await;
-    let mut status_message = StatusMessage::from_message(msg).with_max_filesize(max_filesize);
+    let max_filesize = effective_max_filesize(ctx, bot, msg).await;
+    let mut status_message = StatusMessage::from_message(msg)
+        .with_bot(Arc::clone(bot))
+        .with_max_filesize(max_filesize);
 
     urls.sort();
     urls.dedup();
@@ -50,7 +60,7 @@ pub async fn handle_download_request(ctx: &Context, msg: &Message, mut urls: Vec
         if let Some((user, _)) = &user_snapshot {
             users.push(user.clone());
         }
-        if let Err(e) = RpcClient::accounts_upsert(users, places).await {
+        if let Err(e) = rpc.accounts_upsert(users, places).await {
             warn!(?e, "failed to upsert account metadata");
         }
     }
@@ -88,14 +98,15 @@ pub async fn handle_download_request(ctx: &Context, msg: &Message, mut urls: Vec
         let file_url = file_url.with_max_filesize(Some(max_filesize));
         let file_ref = FileReference::url(file_url);
 
-        let result = match RpcClient::work_request_create(
-            RequestInfo::DownloadAndFix(file_ref),
-            url_status_message.to_metadata(),
-            Some(format!("discord-{}-{}-{}", msg.channel_id, msg.id, i)),
-            user_ref.clone(),
-            place_ref.clone(),
-        )
-        .await
+        let result = match rpc
+            .work_request_create(
+                RequestInfo::DownloadAndFix(file_ref),
+                url_status_message.to_metadata(),
+                Some(format!("discord-{}-{}-{}", msg.channel_id, msg.id, i)),
+                user_ref.clone(),
+                place_ref.clone(),
+            )
+            .await
         {
             Ok(CreateResult::Ok(result)) => result,
             Ok(CreateResult::Banned { reason }) => {
@@ -133,7 +144,13 @@ pub async fn handle_download_request(ctx: &Context, msg: &Message, mut urls: Vec
 
         // Start a supervised per-request watcher for this freshly created
         // request. Not a recovery task (it was just created).
-        start_request_task(result.id.clone(), url_status_message, false).await;
+        start_request_task(
+            Arc::clone(rpc),
+            result.id.clone(),
+            url_status_message,
+            false,
+        )
+        .await;
 
         added_some = true;
     }
@@ -148,7 +165,7 @@ pub async fn handle_download_request(ctx: &Context, msg: &Message, mut urls: Vec
     status_message.delete_message().await;
 }
 
-async fn effective_max_filesize(ctx: &Context, msg: &Message) -> Size {
+async fn effective_max_filesize(ctx: &Context, bot: &DiscordBot, msg: &Message) -> Size {
     let premium_tier = match msg.guild_id {
         None => None,
         Some(guild_id) => {
@@ -166,7 +183,8 @@ async fn effective_max_filesize(ctx: &Context, msg: &Message) -> Size {
         }
     };
 
-    DiscordBot::max_payload_size().min(DiscordBot::destination_max_filesize(premium_tier))
+    bot.max_payload_size()
+        .min(DiscordBot::destination_max_filesize(premium_tier))
 }
 
 pub fn urls_in_message(msg: &Message) -> Vec<Url> {

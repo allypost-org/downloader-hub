@@ -23,7 +23,7 @@ const columns: ColumnDef<AuthedFullInfo>[] = [
     cell: ({ row }) => (
       <Badge variant="secondary">
         {row.original.for}
-        {row.original.readonly ? " · ro" : ""}
+        {row.original.readonly ? " \u00b7 ro" : ""}
       </Badge>
     ),
   },
@@ -139,7 +139,7 @@ export function TokensPage() {
         <Card className="border-warning">
           <CardContent className="space-y-2 p-4 text-sm">
             <p className="font-semibold">
-              Token created — copy it now, it won't be shown again:
+              Token created &mdash; copy it now, it won't be shown again:
             </p>
             <code className="block break-all rounded-md bg-muted p-2 text-xs">
               {created}
@@ -202,7 +202,7 @@ export function TokensPage() {
         </CardHeader>
         <CardContent>
           {list.isLoading ? (
-            <p className="text-muted-foreground">Loading…</p>
+            <p className="text-muted-foreground">Loading&hellip;</p>
           ) : (
             <DataTable
               columns={tableColumns}

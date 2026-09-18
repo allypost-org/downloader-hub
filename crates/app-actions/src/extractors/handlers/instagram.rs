@@ -9,7 +9,7 @@ use tracing::{debug, trace};
 use url::Url;
 
 use super::{ExtractInfoRequest, Extractor};
-use crate::{config::ActionsConfig, extractors::ExtractedInfo};
+use crate::{ActionCtx, extractors::ExtractedInfo};
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Instagram;
@@ -25,14 +25,18 @@ impl Extractor for Instagram {
         Self::is_post_url(&request.url)
     }
 
-    async fn extract_info(&self, request: &ExtractInfoRequest) -> Result<ExtractedInfo, String> {
+    async fn extract_info(
+        &self,
+        ctx: &ActionCtx,
+        request: &ExtractInfoRequest,
+    ) -> Result<ExtractedInfo, String> {
         let cookie = request
             .headers
             .get(header::COOKIE)
             .and_then(|v| v.to_str().ok());
 
         for i in 0_u32..3 {
-            match get_media_urls(request.url.as_str(), cookie).await? {
+            match get_media_urls(ctx, request.url.as_str(), cookie).await? {
                 Some(media_urls) => return Ok(ExtractedInfo::from_urls(request, media_urls)),
                 None => {
                     let delay = Duration::from_secs(2_u64.pow(i));
@@ -65,19 +69,27 @@ impl Instagram {
     }
 }
 
-async fn get_media_urls(url: &str, cookie: Option<&str>) -> Result<Option<Vec<Url>>, String> {
+async fn get_media_urls(
+    ctx: &ActionCtx,
+    url: &str,
+    cookie: Option<&str>,
+) -> Result<Option<Vec<Url>>, String> {
     if let Some(cookie) = cookie {
-        match get_media_urls_authed(url, cookie).await {
+        match get_media_urls_authed(ctx, url, cookie).await {
             Ok(Some(urls)) => return Ok(Some(urls)),
             Ok(None) => debug!("Authed fetch returned no media; falling back to anonymous"),
             Err(e) => debug!(?e, "Authed extraction failed; falling back to anonymous"),
         }
     }
-    get_media_urls_anonymous(url).await
+    get_media_urls_anonymous(ctx, url).await
 }
 
 #[tracing::instrument(skip_all, fields(url = %url))]
-async fn get_media_urls_authed(url: &str, cookie: &str) -> Result<Option<Vec<Url>>, String> {
+async fn get_media_urls_authed(
+    ctx: &ActionCtx,
+    url: &str,
+    cookie: &str,
+) -> Result<Option<Vec<Url>>, String> {
     trace!("Fetching instagram media URLs from post (authed)");
 
     let Some(shortcode) = shortcode_from_url(url) else {
@@ -88,10 +100,7 @@ async fn get_media_urls_authed(url: &str, cookie: &str) -> Result<Option<Vec<Url
 
     let resp = client
         .get(url)
-        .header(
-            header::USER_AGENT,
-            ActionsConfig::request().user_agent.as_str(),
-        )
+        .header(header::USER_AGENT, ctx.request.user_agent.as_str())
         .header(header::COOKIE, cookie)
         .send()
         .await
@@ -122,17 +131,14 @@ fn shortcode_from_url(url: &str) -> Option<String> {
 }
 
 #[tracing::instrument(skip_all, fields(url = %url))]
-async fn get_media_urls_anonymous(url: &str) -> Result<Option<Vec<Url>>, String> {
+async fn get_media_urls_anonymous(ctx: &ActionCtx, url: &str) -> Result<Option<Vec<Url>>, String> {
     trace!("Fetching instagram media URLs from post");
 
     let client = Client::sneaky().map_err(|e| format!("Failed to create client: {e:?}"))?;
 
     let resp = client
         .get(url)
-        .header(
-            header::USER_AGENT,
-            ActionsConfig::request().user_agent.as_str(),
-        )
+        .header(header::USER_AGENT, ctx.request.user_agent.as_str())
         .send()
         .await
         .map_err(|e| format!("Failed to send request: {e:?}"))?;

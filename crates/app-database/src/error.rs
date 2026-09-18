@@ -3,9 +3,6 @@ pub enum DatabaseError {
     #[error("Database initialized failed: {0}")]
     Init(anyhow::Error),
 
-    #[error("Database already initialized")]
-    AlreadyInitialized,
-
     #[error("Failed to connect to database: {0}")]
     FailedToConnect(anyhow::Error),
 

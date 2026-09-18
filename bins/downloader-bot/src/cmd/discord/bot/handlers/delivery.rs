@@ -6,10 +6,7 @@ use tracing::{trace, warn};
 
 use crate::cmd::{
     _common::request_processor::PlatformDelivery,
-    discord::bot::{
-        discord_bot::DiscordBot,
-        helpers::{file_group::send_attachment_groups, status_message::StatusMessage},
-    },
+    discord::bot::helpers::{file_group::send_attachment_groups, status_message::StatusMessage},
 };
 
 impl PlatformDelivery for StatusMessage {
@@ -26,14 +23,16 @@ impl PlatformDelivery for StatusMessage {
     }
 
     fn is_owner_request(&self) -> bool {
-        DiscordBot::owner_id().is_some_and(|owner_id| self.author_id() == owner_id)
+        self.bot()
+            .owner_id()
+            .is_some_and(|owner_id| self.author_id() == owner_id)
     }
 
     async fn copy_files_to_owner_dir(
         &self,
         files: &[(TempFile, Option<PathBuf>)],
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        copy_files_to_save_dir(files).await
+        copy_files_to_save_dir(files, self.bot().owner_download_dir()).await
     }
 
     async fn send_batches(
@@ -44,19 +43,21 @@ impl PlatformDelivery for StatusMessage {
 
         let reference = self.original_message_reference();
         let channel_id = self.channel_id();
+        let http = Arc::clone(self.bot().bot());
 
         send_attachment_groups(
             files.iter().map(|(f, n)| (f, n.as_ref())),
             max_bytes,
             move |group: Vec<serenity::all::CreateAttachment>| {
                 let reference = reference.clone();
+                let http = Arc::clone(&http);
                 trace!(group_len = group.len(), "Uploading attachment group");
                 let mut builder = CreateMessage::new().reference_message(reference);
                 for att in group {
                     builder = builder.add_file(att);
                 }
                 async move {
-                    match channel_id.send_message(DiscordBot::bot(), builder).await {
+                    match channel_id.send_message(&http, builder).await {
                         Ok(_) => {
                             trace!("Attachment group sent");
                             Ok(())
@@ -79,8 +80,9 @@ impl PlatformDelivery for StatusMessage {
 #[tracing::instrument(skip_all)]
 async fn copy_files_to_save_dir(
     fixed_file_paths: &[(TempFile, Option<PathBuf>)],
+    download_dir: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let download_dir = match DiscordBot::owner_download_dir() {
+    let download_dir = match download_dir {
         Some(x) => x,
         None => return Ok(()),
     };
@@ -108,12 +110,10 @@ async fn copy_files_to_save_dir(
     Ok(())
 }
 
-/// Re-export so the message handler / startup path can ask the keyed
-/// supervisor to start a request task with the Discord status message.
 pub use crate::cmd::_common::request_processor::{supervisor, watch_and_process};
 
-/// Kick off a supervised per-request task for Discord.
 pub async fn start_request_task(
+    rpc: Arc<crate::peering::rpc::RpcClient>,
     request_id: Arc<str>,
     status_message: StatusMessage,
     is_recovery: bool,
@@ -121,7 +121,7 @@ pub async fn start_request_task(
     supervisor()
         .start(
             request_id.clone(),
-            watch_and_process(request_id, status_message, is_recovery),
+            watch_and_process(rpc, request_id, status_message, is_recovery),
         )
         .await;
 }

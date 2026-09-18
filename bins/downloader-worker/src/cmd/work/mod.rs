@@ -38,33 +38,51 @@ pub fn run(config: WorkerConfig) -> CmdResult {
 }
 
 async fn async_run(config: WorkerConfig) -> CmdResult {
-    _ = app_tasks::config::init(config.task);
-    _ = app_helpers::config::init(config.dependency_paths.clone());
-    _ = app_actions::config::init(
-        config.endpoint,
-        config.dependency_paths,
-        config.disabled_entries.entries,
-        config.request,
-    );
+    let task_config = config.task;
 
     let conf = config.peer.ticket.api.clone().ok_or("No API config")?;
-    init_peering_endpoint(config.peer).await?;
+
+    let actions = Arc::new(app_actions::Actions::new(
+        Arc::new(app_actions::ActionCtx::new(
+            config.endpoint,
+            config.dependency_paths,
+            config.request,
+        )),
+        config.disabled_entries.entries,
+    ));
+
+    let (peering, _) = init_peering_endpoint(config.peer).await?;
+
+    let worker_loop = app::WorkerLoop::new();
 
     let mut tc = TaskController::new();
 
-    tc.spawn(TaskRunner::run());
-    tc.spawn(async move {
-        loop {
-            match PeeringEndpoint::global().delete_expired_tags().await {
-                Ok(x) => {
-                    if x > 0 {
-                        debug!(count = x, "Deleted expired tags");
+    tc.spawn(TaskRunner::run(task_config));
+    tc.spawn({
+        let peering = peering.clone();
+        async move {
+            loop {
+                match peering.delete_expired_tags().await {
+                    Ok(x) => {
+                        if x > 0 {
+                            debug!(count = x, "Deleted expired tags");
+                        }
                     }
+                    Err(e) => error!(?e, "Failed to delete expired tags"),
                 }
-                Err(e) => error!(?e, "Failed to delete expired tags"),
-            }
 
-            tokio::time::sleep(Duration::from_secs(10)).await;
+                tokio::time::sleep(Duration::from_secs(10)).await;
+            }
+        }
+    });
+    tc.spawn({
+        let loop_state = worker_loop.clone();
+        async move {
+            loop {
+                let jitter = rand::random_range(0..5_000u64);
+                tokio::time::sleep(Duration::from_millis(30_000 + jitter)).await;
+                app::refresh_dynamic_settings(&loop_state).await;
+            }
         }
     });
 
@@ -72,6 +90,9 @@ async fn async_run(config: WorkerConfig) -> CmdResult {
         "Worker",
         Box::new(move || {
             let conf = conf.clone();
+            let actions = actions.clone();
+            let peering = peering.clone();
+            let loop_state = worker_loop.clone();
             async move {
                 let central_addr = match fetch_ticket_from_api(&conf).await {
                     Ok(t) => t.main,
@@ -80,7 +101,7 @@ async fn async_run(config: WorkerConfig) -> CmdResult {
                         return Err(e);
                     }
                 };
-                app::run(conf, central_addr).await
+                app::run(actions, peering, loop_state, conf, central_addr).await
             }
         }),
         RetryConfig::new()
@@ -108,7 +129,7 @@ async fn async_run(config: WorkerConfig) -> CmdResult {
 
 async fn init_peering_endpoint(
     config: PeerCommsWorkerConfig,
-) -> Result<app_peer_comms::IrohEndpointAddr, super::CmdErr> {
+) -> Result<(Arc<PeeringEndpoint>, app_peer_comms::IrohEndpointAddr), super::CmdErr> {
     let ticket = run_retried(
         "Get ticket",
         Box::new({
@@ -152,9 +173,9 @@ async fn init_peering_endpoint(
         .build()
         .await?;
 
-    PeeringEndpoint::init(pe)?;
+    let pe = Arc::new(pe);
 
-    Ok(central_addr)
+    Ok((pe, central_addr))
 }
 
 async fn get_ticket(config: PeerCommsWorkerTicketConfig) -> Result<Ticket, super::CmdErr> {

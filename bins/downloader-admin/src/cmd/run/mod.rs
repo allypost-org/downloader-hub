@@ -1,13 +1,12 @@
 use std::time::Duration;
 
-use app_config::GlobalConfig;
 use app_database::Database;
 use app_helpers::futures::{
     retry_future::{RetryConfig, keep_running},
     run_future,
 };
 use tokio::task::JoinSet;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 use crate::cmd::CmdResult;
 
@@ -42,9 +41,7 @@ pub fn run(config: AdminConfig) -> CmdResult {
 }
 
 async fn async_run(config: AdminConfig) -> CmdResult {
-    Database::init(config.database.clone())
-        .await
-        .expect("Failed to initialize database");
+    let db = Arc::new(Database::new(config.database.clone()).await?);
 
     let central_slot: Arc<arc_swap::ArcSwapOption<components::CentralClient>> =
         Arc::new(arc_swap::ArcSwapOption::empty());
@@ -56,14 +53,19 @@ async fn async_run(config: AdminConfig) -> CmdResult {
     let http_central_slot = central_slot.clone();
     handles.spawn(keep_running(
         "HTTP API",
-        Box::new(move || {
-            let http_config = http_config.clone();
-            let http_central_slot = http_central_slot.clone();
-            let session_secret = session_secret.clone();
-            Box::pin(async move {
-                components::http_api::run(http_config, http_central_slot, session_secret).await
+        {
+            let db = db.clone();
+            Box::new(move || {
+                let http_config = http_config.clone();
+                let http_central_slot = http_central_slot.clone();
+                let session_secret = session_secret.clone();
+                let db = db.clone();
+                Box::pin(async move {
+                    components::http_api::run(http_config, http_central_slot, session_secret, db)
+                        .await
+                })
             })
-        }),
+        },
         RetryConfig::new()
             .with_retry_delays(RETRY_DELAYS.clone())
             .with_reset_retries_after(Some(FIVE_MINS)),
@@ -78,7 +80,13 @@ async fn async_run(config: AdminConfig) -> CmdResult {
 
     handles.spawn(keep_running(
         "Log settings",
-        Box::new(components::log_settings::run),
+        {
+            let db = db.clone();
+            Box::new(move || {
+                let db = db.clone();
+                components::log_settings::run(db)
+            })
+        },
         RetryConfig::new()
             .with_retry_delays(RETRY_DELAYS.clone())
             .with_reset_retries_after(Some(FIVE_MINS)),
@@ -90,12 +98,6 @@ async fn async_run(config: AdminConfig) -> CmdResult {
             Ok((name, Err(e))) => error!(component = name, ?e, "Component failed"),
             Err(e) => error!(?e, "Component task panicked"),
         }
-    }
-
-    if let Some(pe) = app_peer_comms::PeeringEndpoint::get_global()
-        && let Err(e) = pe.router.shutdown().await
-    {
-        warn!(?e, "Failed to shutdown peering router");
     }
 
     Ok(())

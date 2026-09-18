@@ -1,7 +1,6 @@
 use std::net::SocketAddr;
 
-use app_config::common::{DatabaseConfig, WorkerHttpApiConfig};
-use app_database::Database;
+use app_config::common::WorkerHttpApiConfig;
 use tokio::net::TcpListener;
 use tracing::{debug, error, info};
 
@@ -9,17 +8,21 @@ mod routes;
 
 pub async fn run(
     worker_config: WorkerHttpApiConfig,
-    database_config: DatabaseConfig,
+    state: super::state::SharedCentralState,
 ) -> super::ComponentResult {
-    if let Err(e) = Database::init(database_config).await {
-        error!(?e, "Database::init failed");
-    }
-
     debug!(?worker_config, "Starting HTTP API");
 
-    let app = routes::create_router(&routes::RouterConfig {
-        request_ip_source: worker_config.request_ip_source.parse()?,
-    });
+    let app = routes::create_router(
+        &routes::RouterConfig {
+            request_ip_source: worker_config.request_ip_source.parse()?,
+        },
+        state.db().clone(),
+        state
+            .peering
+            .get()
+            .expect("central peering endpoint initialized before components spawn")
+            .clone(),
+    );
 
     let listener = match TcpListener::bind(worker_config.bind_addr()).await {
         Ok(listener) => listener,

@@ -1,17 +1,17 @@
+use app_config::common;
 use jiff::tz::TimeZone;
 use tracing::{Instrument, Span, debug, error, info, info_span};
-
-use crate::config::TaskConfig;
 
 pub mod tasks;
 
 #[tracing::instrument(name = "cron", skip_all)]
-pub fn spawn() {
+#[allow(clippy::needless_pass_by_value)]
+pub fn spawn(conf: common::TaskConfig) {
     info!("Spawning cron tasks");
 
     let span = info_span!("tasks");
     let _span = span.enter();
-    if let Some(yt_dlp_update_interval) = TaskConfig::global().yt_dlp_update_interval {
+    if let Some(yt_dlp_update_interval) = conf.yt_dlp_update_interval {
         debug!(interval = ?yt_dlp_update_interval, "Spawning yt-dlp update task");
         tokio::task::spawn(
             async move {

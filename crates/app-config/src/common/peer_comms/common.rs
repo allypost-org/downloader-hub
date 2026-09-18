@@ -88,7 +88,7 @@ pub struct RelayOptions {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args, Validate)]
 pub struct BindConfig {
-    /// Set the bind port for our both sockets. By default, a random port will be used.
+    /// Set the bind port for both of our sockets. By default, a random port will be used.
     #[clap(
         long = "peer-comms-bind-port",
         env = "DOWNLOADER_HUB_PEER_COMMS_BIND_PORT",

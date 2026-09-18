@@ -1,12 +1,11 @@
 use std::convert::Into;
 
+use app_config::{EntryCategory, EntryId};
 use app_helpers::file_time::transferable_file_times;
 pub use common::{FixRequest, FixResult, FixerError, FixerReturn};
-pub use handlers::AVAILABLE_FIXERS;
+pub use handlers::ALL_FIXERS;
 use handlers::FixerInstance;
 use tracing::{Instrument, debug, trace, warn};
-
-use crate::config::ActionsConfig;
 
 mod common;
 pub mod handlers;
@@ -18,22 +17,28 @@ pub trait Fixer: std::fmt::Debug + Send + Sync {
         self.typetag_name()
     }
 
-    fn description(&self) -> &'static str;
-
-    fn can_run(&self) -> bool {
-        true
+    fn entry_id(&self) -> EntryId {
+        EntryId::new(EntryCategory::Fixer, self.name())
     }
 
-    fn is_enabled(&self) -> bool {
-        ActionsConfig::global().is_enabled(("fixer", self.name()))
+    fn description(&self) -> &'static str;
+
+    async fn can_run(&self, _ctx: &crate::ActionCtx) -> bool {
+        true
     }
 
     #[allow(unused_variables)]
-    async fn can_run_for(&self, request: &FixRequest) -> bool {
+    async fn can_run_for(&self, ctx: &crate::ActionCtx, request: &FixRequest) -> bool {
         true
     }
 
-    async fn run(&self, request: &FixRequest) -> FixerReturn;
+    async fn run(&self, ctx: &crate::ActionCtx, request: &FixRequest) -> FixerReturn;
+}
+
+impl app_config::AsEntryId for dyn Fixer + Send + Sync {
+    fn entry_id(&self) -> EntryId {
+        Fixer::entry_id(self)
+    }
 }
 
 pub trait IntoFixerReturn {
@@ -49,12 +54,12 @@ where
     }
 }
 
-pub async fn fix_file(request: FixRequest) -> FixerReturn {
-    fix_file_with(AVAILABLE_FIXERS.clone(), request).await
-}
-
-#[tracing::instrument(skip(request))]
-pub async fn fix_file_with(fixers: Vec<FixerInstance>, request: FixRequest) -> FixerReturn {
+#[tracing::instrument(skip(ctx, request))]
+pub async fn fix_file_with(
+    ctx: &crate::ActionCtx,
+    fixers: Vec<FixerInstance>,
+    request: FixRequest,
+) -> FixerReturn {
     let request = request.resolve_path()?.check_path()?;
     debug!(?request, "Fixing file");
 
@@ -64,14 +69,14 @@ pub async fn fix_file_with(fixers: Vec<FixerInstance>, request: FixRequest) -> F
     for fixer in fixers {
         trace!(?fixer, "Trying fixer");
 
-        if !fixer.can_run_for(&req).await {
+        if !fixer.can_run_for(ctx, &req).await {
             continue;
         }
 
         trace!("Running fixer {fixer:?} on {req:?}");
 
         let result = match fixer
-            .run(&req)
+            .run(ctx, &req)
             .instrument(tracing::trace_span!("fixer", fixer = %fixer.name()))
             .await
         {

@@ -5,6 +5,7 @@ use tracing::trace;
 use url::Url;
 
 use super::{ExtractInfoRequest, ExtractedInfo, Extractor};
+use crate::ActionCtx;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Imgur;
@@ -20,8 +21,12 @@ impl Extractor for Imgur {
         Self::is_media_url(&request.url) || Self::is_post_url(&request.url)
     }
 
-    async fn extract_info(&self, request: &ExtractInfoRequest) -> Result<ExtractedInfo, String> {
-        let post_data = get_post_data(request).await?;
+    async fn extract_info(
+        &self,
+        ctx: &ActionCtx,
+        request: &ExtractInfoRequest,
+    ) -> Result<ExtractedInfo, String> {
+        let post_data = get_post_data(ctx, request).await?;
 
         let media = post_data.media.into_iter().map(|x| x.url);
 
@@ -63,9 +68,9 @@ struct ImgurPostMedia {
     url: String,
 }
 
-async fn get_post_data(req: &ExtractInfoRequest) -> Result<ImgurPostData, String> {
+async fn get_post_data(ctx: &ActionCtx, req: &ExtractInfoRequest) -> Result<ImgurPostData, String> {
     let resp = req
-        .as_request_builder()?
+        .as_request_builder(ctx)?
         .send()
         .await
         .map_err(|e| format!("Failed to send request to imgur: {:?}", e))?

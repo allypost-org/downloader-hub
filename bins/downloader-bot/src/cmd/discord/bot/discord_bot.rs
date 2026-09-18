@@ -1,4 +1,4 @@
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use app_config::{common::Size, conditional::discord_bot::DiscordBotConfig};
 use serenity::{all::PremiumTier, http::Http, model::id::UserId};
@@ -12,36 +12,39 @@ pub struct DiscordBot {
     config: Arc<DiscordBotConfig>,
 }
 
-static DISCORD_BOT: OnceLock<DiscordBot> = OnceLock::new();
+pub struct DiscordBotKey;
+
+impl serenity::prelude::TypeMapKey for DiscordBotKey {
+    type Value = Arc<DiscordBot>;
+}
 
 impl DiscordBot {
-    pub fn init(http: Arc<Http>, config: Arc<DiscordBotConfig>) {
-        _ = DISCORD_BOT.set(Self { http, config });
+    pub const fn new(http: Arc<Http>, config: Arc<DiscordBotConfig>) -> Self {
+        Self { http, config }
     }
 
-    pub fn instance() -> &'static Self {
-        DISCORD_BOT.get().expect("Discord bot not initialized")
-    }
-
-    pub fn bot() -> &'static Arc<Http> {
-        &Self::instance().http
+    pub const fn bot(&self) -> &Arc<Http> {
+        &self.http
     }
 
     #[must_use]
-    pub fn owner_id() -> Option<UserId> {
-        Self::instance().config.owner_id.map(UserId::new)
+    pub fn owner_id(&self) -> Option<UserId> {
+        self.config.owner_id.map(UserId::new)
     }
 
-    pub fn owner_download_dir() -> Option<std::path::PathBuf> {
-        Self::instance().config.owner_download_dir.clone()
+    #[must_use]
+    pub fn owner_download_dir(&self) -> Option<std::path::PathBuf> {
+        self.config.owner_download_dir.clone()
     }
 
-    pub fn max_payload_size() -> Size {
-        Self::instance().config.max_payload_size
+    #[must_use]
+    pub fn max_payload_size(&self) -> Size {
+        self.config.max_payload_size
     }
 
-    pub fn configured_max_filesize() -> Size {
-        Self::max_payload_size()
+    #[must_use]
+    pub fn configured_max_filesize(&self) -> Size {
+        self.max_payload_size()
     }
 
     pub const fn destination_max_filesize(premium_tier: Option<PremiumTier>) -> Size {
@@ -52,7 +55,8 @@ impl DiscordBot {
         }
     }
 
-    pub fn safe_max_filesize() -> Size {
-        Self::configured_max_filesize().min(DEFAULT_MAX_FILESIZE)
+    #[must_use]
+    pub fn safe_max_filesize(&self) -> Size {
+        self.configured_max_filesize().min(DEFAULT_MAX_FILESIZE)
     }
 }

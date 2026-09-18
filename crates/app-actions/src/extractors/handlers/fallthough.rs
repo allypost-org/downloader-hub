@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{ExtractInfoRequest, ExtractedInfo, Extractor};
+use crate::ActionCtx;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Fallthrough;
@@ -16,7 +17,11 @@ impl Extractor for Fallthrough {
         true
     }
 
-    async fn extract_info(&self, request: &ExtractInfoRequest) -> Result<ExtractedInfo, String> {
+    async fn extract_info(
+        &self,
+        _ctx: &ActionCtx,
+        request: &ExtractInfoRequest,
+    ) -> Result<ExtractedInfo, String> {
         Ok(ExtractedInfo::from_url(request, request.url.as_str()))
     }
 }

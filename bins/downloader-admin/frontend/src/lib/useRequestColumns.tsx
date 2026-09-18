@@ -14,7 +14,7 @@ function toNumber(v: string | number): number {
 
 function formatTime(ms: string | number): string {
   const n = toNumber(ms);
-  if (!Number.isFinite(n) || n <= 0) return "—";
+  if (!Number.isFinite(n) || n <= 0) return "\u2014";
   return new Date(n).toLocaleString();
 }
 
@@ -82,7 +82,7 @@ export function useRequestColumns({
               <span>
                 {r.orderedBy
                   ? accounts.userLabelWithFallback(r.orderedBy)
-                  : "—"}
+                  : "\u2014"}
               </span>
               {r.orderedIn && (
                 <span className="text-muted-foreground">

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 use size::Size;
@@ -13,7 +13,7 @@ use tracing::{debug, trace, warn};
 use super::super::TelegramBot;
 use crate::cmd::telegram::bot::helpers::retried::try_send_to_retrying;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[allow(clippy::struct_field_names)]
 pub struct StatusMessage {
     chat_id: ChatId,
@@ -24,6 +24,8 @@ pub struct StatusMessage {
     max_filesize: Option<Size>,
     #[serde(skip)]
     last_text: Option<String>,
+    #[serde(skip)]
+    tg: Option<Arc<TelegramBot>>,
 }
 impl StatusMessage {
     pub const fn new(chat_id: ChatId, msg_id: MessageId, reply_msg_id: Option<MessageId>) -> Self {
@@ -33,7 +35,19 @@ impl StatusMessage {
             reply_msg_id,
             max_filesize: None,
             last_text: None,
+            tg: None,
         }
+    }
+
+    pub fn bot(&self) -> &TelegramBot {
+        self.tg
+            .as_ref()
+            .expect("telegram bot attached to status message")
+    }
+
+    pub fn with_bot(mut self, tg: Arc<TelegramBot>) -> Self {
+        self.tg = Some(tg);
+        self
     }
 
     pub const fn chat_id(&self) -> ChatId {
@@ -50,7 +64,7 @@ impl StatusMessage {
 
     pub fn max_filesize(&self) -> Size {
         self.max_filesize
-            .unwrap_or_else(TelegramBot::effective_max_filesize)
+            .unwrap_or_else(|| self.bot().effective_max_filesize())
     }
 
     pub const fn with_max_filesize(mut self, max_filesize: Size) -> Self {
@@ -82,6 +96,7 @@ impl StatusMessage {
             reply_msg_id: Some(new_msg.id),
             max_filesize: self.max_filesize,
             last_text: Some(text.to_string()),
+            tg: self.tg.clone(),
         })
     }
 
@@ -94,22 +109,27 @@ impl StatusMessage {
         text: &str,
     ) -> Result<Message, teloxide::RequestError> {
         trace!(?self.chat_id, "Sending additional message");
+        let tg = self.bot_arc();
         try_send_to_retrying(
             self.chat_id,
             (text.to_string(), self.msg_id),
-            Box::new(move |chat_id, (text, msg_id)| async move {
-                TelegramBot::instance()
-                    .send_message(chat_id, text)
-                    .disable_notification(true)
-                    .link_preview_options(LinkPreviewOptions {
-                        is_disabled: true,
-                        prefer_large_media: false,
-                        prefer_small_media: false,
-                        show_above_text: false,
-                        url: None,
-                    })
-                    .reply_parameters(ReplyParameters::new(msg_id).allow_sending_without_reply())
-                    .await
+            Box::new(move |chat_id, (text, msg_id)| {
+                let tg = Arc::clone(&tg);
+                async move {
+                    tg.send_message(chat_id, text)
+                        .disable_notification(true)
+                        .link_preview_options(LinkPreviewOptions {
+                            is_disabled: true,
+                            prefer_large_media: false,
+                            prefer_small_media: false,
+                            show_above_text: false,
+                            url: None,
+                        })
+                        .reply_parameters(
+                            ReplyParameters::new(msg_id).allow_sending_without_reply(),
+                        )
+                        .await
+                }
             }),
         )
         .await
@@ -134,20 +154,23 @@ impl StatusMessage {
         for _ in 0..3 {
             match self.status_msg_id() {
                 Some(reply_id) => {
+                    let tg = self.bot_arc();
                     let res = try_send_to_retrying(
                         self.chat_id,
                         text.to_string(),
-                        Box::new(move |chat_id, text| async move {
-                            TelegramBot::instance()
-                                .edit_message_text(chat_id, reply_id, text)
-                                .link_preview_options(LinkPreviewOptions {
-                                    is_disabled: true,
-                                    prefer_large_media: false,
-                                    prefer_small_media: false,
-                                    show_above_text: false,
-                                    url: None,
-                                })
-                                .await
+                        Box::new(move |chat_id, text| {
+                            let tg = Arc::clone(&tg);
+                            async move {
+                                tg.edit_message_text(chat_id, reply_id, text)
+                                    .link_preview_options(LinkPreviewOptions {
+                                        is_disabled: true,
+                                        prefer_large_media: false,
+                                        prefer_small_media: false,
+                                        show_above_text: false,
+                                        url: None,
+                                    })
+                                    .await
+                            }
                         }),
                     )
                     .await;
@@ -208,17 +231,25 @@ impl StatusMessage {
 
     pub async fn try_delete_message(&self) -> Result<(), teloxide::RequestError> {
         if let Some(id) = self.status_msg_id() {
+            let tg = self.bot_arc();
             try_send_to_retrying(
                 self.chat_id,
                 id,
-                Box::new(move |chat_id, id| async move {
-                    TelegramBot::instance().delete_message(chat_id, id).await
+                Box::new(move |chat_id, id| {
+                    let tg = Arc::clone(&tg);
+                    async move { tg.delete_message(chat_id, id).await }
                 }),
             )
             .await?;
         }
 
         Ok(())
+    }
+
+    pub fn bot_arc(&self) -> Arc<TelegramBot> {
+        self.tg
+            .clone()
+            .expect("telegram bot attached to status message")
     }
 }
 

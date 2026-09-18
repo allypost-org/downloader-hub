@@ -3,6 +3,8 @@ use std::fmt::Write;
 use app_peer_comms::rpc::request::CapabilitiesSummary;
 use tracing::warn;
 
+use crate::peering::rpc::RpcClient;
+
 #[derive(Debug, Clone, Copy)]
 pub enum CapabilityKind {
     Extractors,
@@ -11,8 +13,8 @@ pub enum CapabilityKind {
 }
 
 /// Fetch the aggregate worker capabilities from central.
-pub async fn fetch() -> Option<CapabilitiesSummary> {
-    match crate::peering::rpc::RpcClient::get_capabilities().await {
+pub async fn fetch(rpc: &RpcClient) -> Option<CapabilitiesSummary> {
+    match rpc.get_capabilities().await {
         Ok(summary) => Some(summary),
         Err(e) => {
             warn!(?e, "Failed to fetch capabilities from central");

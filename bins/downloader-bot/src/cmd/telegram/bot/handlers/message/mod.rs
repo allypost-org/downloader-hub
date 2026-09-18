@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use app_peer_comms::message::v1::{
     central::create_result::CreateResult,
     common::{
@@ -22,11 +24,18 @@ use crate::{
     peering::rpc::RpcClient,
 };
 
-pub async fn handle_message(msg: &TelegramMessage) -> ResponseResult<()> {
+#[allow(clippy::too_many_lines)]
+pub async fn handle_message(
+    tg: &Arc<TelegramBot>,
+    rpc: &Arc<RpcClient>,
+    msg: &TelegramMessage,
+) -> ResponseResult<()> {
     info!("Adding download request to queue");
 
-    let max_filesize = TelegramBot::effective_max_filesize();
-    let mut status_message = StatusMessage::from_message(msg).with_max_filesize(max_filesize);
+    let max_filesize = tg.effective_max_filesize();
+    let mut status_message = StatusMessage::from_message(msg)
+        .with_bot(Arc::clone(tg))
+        .with_max_filesize(max_filesize);
 
     let file_id = FileId::from_message(msg);
     let file_urls = {
@@ -53,7 +62,7 @@ pub async fn handle_message(msg: &TelegramMessage) -> ResponseResult<()> {
         if let Some((user, _)) = &user_snapshot {
             users.push(user.clone());
         }
-        if let Err(e) = RpcClient::accounts_upsert(users, places).await {
+        if let Err(e) = rpc.accounts_upsert(users, places).await {
             warn!(?e, "failed to upsert account metadata");
         }
     }
@@ -66,18 +75,19 @@ pub async fn handle_message(msg: &TelegramMessage) -> ResponseResult<()> {
             .await
             .unwrap_or_else(|| status_message.clone());
 
-        let result = match RpcClient::work_request_create(
-            RequestInfo::DownloadAndFix({
-                let file_url: FileUrl = file_url.into();
+        let result = match rpc
+            .work_request_create(
+                RequestInfo::DownloadAndFix({
+                    let file_url: FileUrl = file_url.into();
 
-                FileReference::url(file_url.with_max_filesize(Some(max_filesize)))
-            }),
-            url_status_message.to_metadata(),
-            Some(format!("tg-{}-{}-{}", msg.chat.id, msg.id, i)),
-            user_ref.clone(),
-            Some(place_ref.clone()),
-        )
-        .await
+                    FileReference::url(file_url.with_max_filesize(Some(max_filesize)))
+                }),
+                url_status_message.to_metadata(),
+                Some(format!("tg-{}-{}-{}", msg.chat.id, msg.id, i)),
+                user_ref.clone(),
+                Some(place_ref.clone()),
+            )
+            .await
         {
             Ok(CreateResult::Ok(result)) => result,
             Ok(CreateResult::Banned { reason }) => {
@@ -120,7 +130,13 @@ pub async fn handle_message(msg: &TelegramMessage) -> ResponseResult<()> {
 
         // Start a supervised per-request watcher for this freshly created
         // request. Not a recovery task (it was just created).
-        start_request_task(result.id.clone(), url_status_message, false).await;
+        start_request_task(
+            Arc::clone(rpc),
+            result.id.clone(),
+            url_status_message,
+            false,
+        )
+        .await;
 
         added_some = true;
     }

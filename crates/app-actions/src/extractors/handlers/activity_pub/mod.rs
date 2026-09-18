@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, trace, warn};
 
 use super::{ExtractInfoRequest, ExtractedInfo, Extractor};
-use crate::extractors::ExtractedUrlInfo;
+use crate::{ActionCtx, extractors::ExtractedUrlInfo};
 
 pub mod mastodon;
 pub mod misskey;
@@ -35,7 +35,11 @@ impl Extractor for ActivityPub {
             .any(|handler| handler.can_handle(&info, &url))
     }
 
-    async fn extract_info(&self, request: &ExtractInfoRequest) -> Result<ExtractedInfo, String> {
+    async fn extract_info(
+        &self,
+        ctx: &ActionCtx,
+        request: &ExtractInfoRequest,
+    ) -> Result<ExtractedInfo, String> {
         let mut maybe_post_url = request.url.to_string();
         let mut seen_urls = vec![];
 
@@ -59,7 +63,7 @@ impl Extractor for ActivityPub {
 
                 trace!(?handler, "Handling with handler");
 
-                let result = match handler.handle(&info, &maybe_post_url).await {
+                let result = match handler.handle(ctx, &info, &maybe_post_url).await {
                     Ok(result) => result,
                     Err(e) => {
                         warn!(?e, "Failed to handle URL");
@@ -98,7 +102,12 @@ static HANDLERS: LazyLock<Vec<Box<dyn APHandler>>> = LazyLock::new(handlers);
 trait APHandler: std::fmt::Debug + Send + Sync {
     fn can_handle(&self, info: &NodeInfo, url: &str) -> bool;
 
-    async fn handle(&self, info: &NodeInfo, url: &str) -> Result<HandleResult, String>;
+    async fn handle(
+        &self,
+        ctx: &ActionCtx,
+        info: &NodeInfo,
+        url: &str,
+    ) -> Result<HandleResult, String>;
 }
 
 #[derive(Debug)]

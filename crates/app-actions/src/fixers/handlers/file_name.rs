@@ -5,9 +5,12 @@ use thiserror::Error;
 use tokio::fs;
 use tracing::{debug, trace};
 
-use crate::fixers::{
-    Fixer, FixerReturn, IntoFixerReturn,
-    common::{FixRequest, FixResult, FixerError},
+use crate::{
+    ActionCtx,
+    fixers::{
+        Fixer, FixerReturn, IntoFixerReturn,
+        common::{FixRequest, FixResult, FixerError},
+    },
 };
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -20,9 +23,7 @@ impl Fixer for FileName {
         "Fix file name to contain only approved characters."
     }
 
-    /// Options:
-    ///
-    async fn run(&self, request: &FixRequest) -> FixerReturn {
+    async fn run(&self, _ctx: &ActionCtx, request: &FixRequest) -> FixerReturn {
         fix_file_name(request.clone()).await
     }
 }

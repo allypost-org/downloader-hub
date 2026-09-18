@@ -7,7 +7,10 @@ use app_helpers::{
 use serde::{Deserialize, Serialize};
 use tracing::trace;
 
-use crate::actions::{Action, ActionError, ActionRequest, ActionResult};
+use crate::{
+    ActionCtx,
+    actions::{Action, ActionError, ActionRequest, ActionResult},
+};
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct CompactMedia;
@@ -33,7 +36,11 @@ impl Action for CompactMedia {
         matches!(file_mime.type_(), mime::VIDEO | mime::AUDIO)
     }
 
-    async fn run(&self, request: &ActionRequest) -> Result<ActionResult, ActionError> {
+    async fn run(
+        &self,
+        _ctx: &ActionCtx,
+        request: &ActionRequest,
+    ) -> Result<ActionResult, ActionError> {
         trace!("Running compact video action");
         let output_file_path = request
             .output_dir

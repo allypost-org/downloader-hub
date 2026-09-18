@@ -1,4 +1,4 @@
-use std::{future::Future, pin::Pin};
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use app_database::entity::accounts::{AccountPlace, AccountUser, Platform};
 use app_peer_comms::message::v1::central::{
@@ -14,15 +14,16 @@ pub type UserFetchFut = Pin<Box<dyn Future<Output = Result<AccountUser, String>>
 pub type PlaceFetchFut = Pin<Box<dyn Future<Output = Result<AccountPlace, String>> + Send>>;
 
 pub async fn run_refresh_loop(
+    rpc: Arc<RpcClient>,
     platform: Platform,
-    fetch_user: fn(&str) -> UserFetchFut,
-    fetch_place: fn(&str) -> PlaceFetchFut,
+    fetch_user: impl Fn(&str) -> UserFetchFut + Send + Sync,
+    fetch_place: impl Fn(&str) -> PlaceFetchFut + Send + Sync,
 ) {
     let poll_interval = std::time::Duration::from_secs(5);
     loop {
-        match RpcClient::get_account_refresh_item(platform).await {
+        match rpc.get_account_refresh_item(platform).await {
             Ok(GetAccountRefreshItemResult::Ok(work)) => {
-                process_one(*work, fetch_user, fetch_place).await;
+                process_one(&rpc, *work, &fetch_user, &fetch_place).await;
             }
             Ok(GetAccountRefreshItemResult::NoWork) => {
                 tokio::time::sleep(poll_interval).await;
@@ -44,14 +45,15 @@ pub async fn run_refresh_loop(
 }
 
 async fn process_one(
+    rpc: &RpcClient,
     work: WorkRequest,
-    fetch_user: fn(&str) -> UserFetchFut,
-    fetch_place: fn(&str) -> PlaceFetchFut,
+    fetch_user: &(impl Fn(&str) -> UserFetchFut + Sync),
+    fetch_place: &(impl Fn(&str) -> PlaceFetchFut + Sync),
 ) {
     let request_id = work.request_id();
     let WorkRequestInfo::RefreshAccountInfo(payload) = work.info().clone() else {
         warn!(%request_id, "account refresh worker got non-refresh item; freeing");
-        let _ = RpcClient::work_request_free(request_id.clone()).await;
+        let _ = rpc.work_request_free(request_id.clone()).await;
         return;
     };
 
@@ -74,7 +76,9 @@ async fn process_one(
     }
 
     if !errors.is_empty()
-        && let Err(e) = RpcClient::work_request_add_errors(request_id.clone(), errors.clone()).await
+        && let Err(e) = rpc
+            .work_request_add_errors(request_id.clone(), errors.clone())
+            .await
     {
         warn!(?e, %request_id, "failed to record account refresh errors");
     }
@@ -84,26 +88,30 @@ async fn process_one(
             .first()
             .cloned()
             .unwrap_or_else(|| "no account metadata fetched".to_string());
-        if let Err(e) = RpcClient::work_request_fail(request_id.clone(), reason.into()).await {
+        if let Err(e) = rpc
+            .work_request_fail(request_id.clone(), reason.into())
+            .await
+        {
             warn!(?e, %request_id, "failed to fail account refresh request");
         }
         return;
     }
 
-    if let Err(e) = RpcClient::accounts_upsert(users, places).await {
+    if let Err(e) = rpc.accounts_upsert(users, places).await {
         error!(?e, %request_id, "accounts_upsert failed during refresh");
-        if let Err(fail_err) = RpcClient::work_request_fail(
-            request_id.clone(),
-            format!("accounts upsert failed: {e}").into(),
-        )
-        .await
+        if let Err(fail_err) = rpc
+            .work_request_fail(
+                request_id.clone(),
+                format!("accounts upsert failed: {e}").into(),
+            )
+            .await
         {
             warn!(?fail_err, %request_id, "failed to fail account refresh after upsert error");
         }
         return;
     }
 
-    match RpcClient::complete_account_refresh(request_id.clone()).await {
+    match rpc.complete_account_refresh(request_id.clone()).await {
         Ok(CompleteAccountRefreshResult::Ok) => {
             info!(%request_id, "account refresh request completed");
         }

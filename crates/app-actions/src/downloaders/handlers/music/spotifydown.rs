@@ -8,7 +8,10 @@ use tracing::{debug, trace, warn};
 use url::Url;
 
 use super::Handler;
-use crate::downloaders::{DownloadRequest, Downloader, handlers::generic::Generic};
+use crate::{
+    ActionCtx,
+    downloaders::{DownloadRequest, Downloader, handlers::generic::Generic},
+};
 
 const URL_BASE: &str = "https://spotifydown.com";
 const API_BASE: &str = "https://api.spotifydown.com";
@@ -20,8 +23,12 @@ pub struct SpotifydownProvider;
 
 #[async_trait::async_trait]
 impl Handler for SpotifydownProvider {
-    #[tracing::instrument(skip(self, request), fields(url = ?request.url.url().as_str()))]
-    async fn download(&self, request: &DownloadRequest) -> anyhow::Result<PathBuf> {
+    #[tracing::instrument(skip(self, ctx, request), fields(url = ?request.url.url().as_str()))]
+    async fn download(
+        &self,
+        ctx: &ActionCtx,
+        request: &DownloadRequest,
+    ) -> anyhow::Result<PathBuf> {
         let download_dir = request.download_dir();
         let song_url = request.url.url();
         debug!("Downloading song");
@@ -44,6 +51,7 @@ impl Handler for SpotifydownProvider {
 
         Generic
             .download(
+                ctx,
                 &DownloadRequest::from_url(&download_url, download_dir)
                     .with_downloader_options(request.downloader_options.clone()),
             )

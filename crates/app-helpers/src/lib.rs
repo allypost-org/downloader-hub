@@ -1,4 +1,3 @@
-pub mod config;
 pub mod dirs;
 pub mod domain;
 pub mod encoding;

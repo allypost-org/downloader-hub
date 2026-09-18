@@ -46,7 +46,7 @@ export function NodesPage() {
         </CardHeader>
         <CardContent>
           {connections.isLoading ? (
-            <p className="text-muted-foreground">Loading…</p>
+            <p className="text-muted-foreground">Loading&hellip;</p>
           ) : connections.data && connections.data.connections.length > 0 ? (
             <Table>
               <TableHeader>
@@ -67,7 +67,7 @@ export function NodesPage() {
                       <Badge variant="secondary">{c.role}</Badge>
                     </TableCell>
                     <TableCell className="text-xs">
-                      {c.version ?? "—"}
+                      {c.version ?? "\u2014"}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {new Date(Number(c.lastSeen)).toLocaleTimeString()}

@@ -102,7 +102,7 @@ export function useLiveStream() {
           closedByUs = true;
         }
       } catch {
-        // network blip — leave auth as-is, keep retrying the socket
+        // network blip - leave auth as-is, keep retrying the socket
       }
     }
 
@@ -127,7 +127,7 @@ export function useLiveStream() {
         } else if (msg.type === "accountNames") {
           qc.setQueryData(["account-names"], msg.data);
         } else if (msg.type === "requestsChanged") {
-          // Just a ping — invalidate paginated request queries so they refetch
+          // Just a ping - invalidate paginated request queries so they refetch
           // via HTTP. The actual row data is not carried over the WS.
           qc.invalidateQueries({ queryKey: ["requests"] });
           qc.invalidateQueries({ queryKey: ["request"] });

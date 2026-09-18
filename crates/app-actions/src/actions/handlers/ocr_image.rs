@@ -11,8 +11,8 @@ use tokio_util::codec::{BytesCodec, FramedRead};
 use tracing::trace;
 
 use crate::{
+    ActionCtx,
     actions::{Action, ActionError, ActionRequest, ActionResult},
-    config::ActionsConfig,
 };
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -33,8 +33,8 @@ impl Action for OcrImage {
         "Run OCR on an image. Depends on external service so may be randomly down."
     }
 
-    async fn can_run(&self) -> bool {
-        ActionsConfig::endpoints().ocr_api_base_url.is_some()
+    async fn can_run(&self, ctx: &ActionCtx) -> bool {
+        ctx.endpoint.ocr_api_base_url.is_some()
     }
 
     async fn can_run_for(&self, req: &ActionRequest) -> bool {
@@ -53,7 +53,11 @@ impl Action for OcrImage {
     }
 
     #[allow(clippy::too_many_lines)]
-    async fn run(&self, request: &ActionRequest) -> Result<ActionResult, ActionError> {
+    async fn run(
+        &self,
+        ctx: &ActionCtx,
+        request: &ActionRequest,
+    ) -> Result<ActionResult, ActionError> {
         #[derive(Debug, Deserialize)]
         struct OcrEndpoint {
             available_handlers: Vec<String>,
@@ -77,7 +81,8 @@ impl Action for OcrImage {
         })?;
 
         if opts.list_engines {
-            let url = ActionsConfig::endpoints()
+            let url = ctx
+                .endpoint
                 .ocr_api_url("endpoints")
                 .ok_or_else(|| ActionError::FailedAction("OCR API URL not set".into()))?;
 
@@ -127,7 +132,8 @@ impl Action for OcrImage {
             }
         };
 
-        let url = ActionsConfig::endpoints()
+        let url = ctx
+            .endpoint
             .ocr_api_url(format!("ocr/{}", engine).as_str())
             .ok_or_else(|| ActionError::FailedAction("OCR API URL not set".into()))?;
 

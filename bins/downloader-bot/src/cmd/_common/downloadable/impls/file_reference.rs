@@ -18,7 +18,11 @@ impl Downloadable for FileReference {
         }
     }
 
-    async fn download_into(&self, mut to: File) -> Result<(File, Option<PathBuf>), Self::Error> {
+    async fn download_into(
+        &self,
+        peering: &app_peer_comms::PeeringEndpoint,
+        mut to: File,
+    ) -> Result<(File, Option<PathBuf>), Self::Error> {
         debug!(from = ?self, "Downloading file");
         let res = match self {
             Self::Url(url) => {
@@ -62,13 +66,11 @@ impl Downloadable for FileReference {
                 Ok((to, None))
             }
 
-            Self::BlobTicket(ticket) => app_peer_comms::PeeringEndpoint::download_ticket_into(
-                ticket.ticket.clone(),
-                &mut to,
-            )
-            .await
-            .map(|_| (to, PathBuf::from_str(ticket.file_name.as_ref()).ok()))
-            .map_err(|e| anyhow::anyhow!(e).context("Failed to download file via iroh ticket")),
+            Self::BlobTicket(ticket) => peering
+                .download_ticket_into(ticket.ticket.clone(), &mut to)
+                .await
+                .map(|_| (to, PathBuf::from_str(ticket.file_name.as_ref()).ok()))
+                .map_err(|e| anyhow::anyhow!(e).context("Failed to download file via iroh ticket")),
         };
 
         debug!(?res, "Finished downloading file");

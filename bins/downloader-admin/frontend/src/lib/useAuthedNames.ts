@@ -8,7 +8,7 @@ import { api } from "@/lib/api";
  */
 export function useAuthedNames() {
   // Reactive view onto the WS-pushed name map. The `queryFn` is a no-op
-  // placeholder — the data is populated externally by `useLiveStream` via
+  // placeholder - the data is populated externally by `useLiveStream` via
   // `qc.setQueryData(["authed-names"], ...)`.
   const live = useQuery<Record<string, string> | null>({
     queryKey: ["authed-names"],

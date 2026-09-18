@@ -1,0 +1,19 @@
+#!/bin/sh
+# AGENTS.md forbids typographic glyphs in committed text (use -, ->, ...,
+# straight quotes, or \uXXXX/entity escapes). Only added lines are checked
+# so pre-existing violations do not block unrelated commits.
+set -eu
+export LC_ALL=C.UTF-8
+
+hits=$(
+    git diff --cached -U0 \
+        | grep -E '^\+[^+]' \
+        | grep -nP '\x{2013}|\x{2014}|\x{2018}|\x{2019}|\x{201C}|\x{201D}|\x{2022}|\x{2026}|\x{2192}|\x{00A0}' \
+        || true
+)
+
+if [ -n "$hits" ]; then
+    printf '%s\n' "$hits" >&2
+    echo "typographic glyph(s) in added lines; see AGENTS.md ASCII-only rule" >&2
+    exit 1
+fi

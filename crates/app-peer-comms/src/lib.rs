@@ -7,10 +7,7 @@ use std::{
 };
 
 use anyhow::Context;
-use app_config::{
-    GlobalConfig,
-    common::{BlobConfig, PeerCommsCommonConfig},
-};
+use app_config::common::{BlobConfig, PeerCommsCommonConfig};
 pub use app_database::entity::accounts::{AccountPlaceRef, AccountUserRef};
 pub use app_requests::install_default_crypto_provider;
 use futures::StreamExt;
@@ -120,7 +117,7 @@ impl PeeringEndpointBuilder {
     }
 }
 
-#[derive(Debug, Clone, GlobalConfig)]
+#[derive(Debug, Clone)]
 pub struct PeeringEndpoint {
     pub router: Router,
     pub topic_id: TopicId,
@@ -131,6 +128,7 @@ pub struct PeeringEndpoint {
     pub main_node_id: Option<EndpointId>,
     node_addr: Arc<RwLock<EndpointAddr>>,
     join_ticket: Arc<RwLock<ticket::Ticket>>,
+    downloader: OnceLock<Downloader>,
 }
 impl PeeringEndpoint {
     #[must_use]
@@ -213,9 +211,9 @@ impl PeeringEndpoint {
 
 impl PeeringEndpoint {
     #[must_use]
-    pub fn downloader(&self) -> &'static Downloader {
-        static DOWNLOADER: OnceLock<Downloader> = OnceLock::new();
-        DOWNLOADER.get_or_init(|| self.blobs.store().downloader(self.router.endpoint()))
+    pub fn downloader(&self) -> &Downloader {
+        self.downloader
+            .get_or_init(|| self.blobs.store().downloader(self.router.endpoint()))
     }
 
     #[must_use]
@@ -232,18 +230,6 @@ impl PeeringEndpoint {
     pub fn download(&self, ticket: &IrohBlobTicket) -> DownloadProgress {
         self.download_with(self.downloader(), ticket)
     }
-
-    // pub async fn get_blob(&self, ticket: &BlobTicket) {
-    //     let endpoint = iroh::Endpoint::empty_builder(iroh::RelayMode::Default)
-    //         .discovery(PkarrResolver::n0_dns())
-    //         .bind()
-    //         .await
-    //         .unwrap();
-
-    //     iroh_blobs::format::collection::Collection::read_fsm(fsm_at_start_root)
-
-    //     iroh_blobs::get::request::get_blob(connection, hash)
-    // }
 }
 
 impl PeeringEndpoint {
@@ -329,9 +315,7 @@ impl PeeringEndpoint {
                             .await
                             .context("Could not write to file")?;
                     }
-                    bao_tree::io::BaoContentItem::Parent(_parent) => {
-                        // trace!(?parent, "Blob download parent");
-                    }
+                    bao_tree::io::BaoContentItem::Parent(_parent) => {}
                 },
                 Some(IrohGetBlobItem::Done(stats)) => {
                     break stats;
@@ -352,32 +336,34 @@ impl PeeringEndpoint {
 
     #[tracing::instrument(skip_all, fields(hash = %ticket.hash()))]
     pub async fn download_ticket(
+        &self,
         ticket: IrohBlobTicket,
         to: &Path,
     ) -> Result<(File, IrohBlobStats), Box<dyn std::error::Error + Send + Sync>> {
         let mut file = File::create(to).await?;
 
-        let stats = Self::download_ticket_into(ticket, &mut file).await?;
+        let stats = self.download_ticket_into(ticket, &mut file).await?;
 
         Ok((file, stats))
     }
 
     pub async fn download_ticket_into(
+        &self,
         ticket: IrohBlobTicket,
         file: &mut File,
     ) -> Result<IrohBlobStats, Box<dyn std::error::Error + Send + Sync>> {
         debug!(target: PeeringEndpoint::trace_span_name(), ?ticket, ?file, "Downloading blob");
 
         let addr = ticket.addr().clone();
-        let conn = Self::global().directly_connect_to(addr).await?;
+        let conn = self.directly_connect_to(addr).await?;
 
         trace!(target: PeeringEndpoint::trace_span_name(), "Connected to peer");
 
-        let mut progress = Self::global().blob_downloader(conn, ticket.hash());
+        let mut progress = self.blob_downloader(conn, ticket.hash());
 
         trace!(target: PeeringEndpoint::trace_span_name(), "Downloading blob");
 
-        let stats = Self::global().download_blob_to(&mut progress, file).await?;
+        let stats = self.download_blob_to(&mut progress, file).await?;
 
         file.flush().await?;
 
@@ -480,6 +466,7 @@ impl PeeringEndpoint {
             peers: Arc::new(RwLock::new(builder.peers)),
             join_ticket: Arc::new(RwLock::new(join_ticket)),
             main_node_id: builder.main_node_id,
+            downloader: OnceLock::new(),
         }
         .with_endpoint_addr_watcher())
     }

@@ -1,9 +1,10 @@
-use app_peer_comms::PeeringEndpoint;
 use futures::StreamExt;
 use tracing::{debug, info, trace};
 
-pub async fn run() -> super::ComponentResult {
-    let pe = PeeringEndpoint::global();
+use super::state::SharedCentralState;
+
+pub async fn run(state: SharedCentralState) -> super::ComponentResult {
+    let pe = state.peering.get().expect("peering endpoint initialized");
 
     {
         let node_id = pe.endpoint_id().await;

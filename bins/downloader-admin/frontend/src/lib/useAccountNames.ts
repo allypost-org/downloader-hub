@@ -37,11 +37,11 @@ export function useAccountNames() {
   }
 
   function userLabelWithFallback(ref: AccountRef | null | undefined): string {
-    return userLabel(ref) ?? (ref ? refKey(ref) : "—");
+    return userLabel(ref) ?? (ref ? refKey(ref) : "\u2014");
   }
 
   function placeLabelWithFallback(ref: AccountRef | null | undefined): string {
-    return placeLabel(ref) ?? (ref ? refKey(ref) : "—");
+    return placeLabel(ref) ?? (ref ? refKey(ref) : "\u2014");
   }
 
   return {

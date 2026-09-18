@@ -6,6 +6,7 @@ use thiserror::Error;
 use tokio::fs;
 
 use super::{Action, ActionError, ActionRequest, ActionResult};
+use crate::ActionCtx;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct RenameToId;
@@ -18,9 +19,11 @@ impl Action for RenameToId {
          ($TIME_ID.$ORIGINAL_CROPPED_NAME.$EXT)"
     }
 
-    /// Options:
-    ///
-    async fn run(&self, request: &ActionRequest) -> Result<ActionResult, ActionError> {
+    async fn run(
+        &self,
+        _ctx: &ActionCtx,
+        request: &ActionRequest,
+    ) -> Result<ActionResult, ActionError> {
         rename_file_to_id(request)
             .await
             .map(|x| ActionResult::path(request, x))

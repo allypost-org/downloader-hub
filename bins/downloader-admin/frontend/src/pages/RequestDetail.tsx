@@ -26,7 +26,7 @@ interface Props {
 
 function formatTime(ms: string | number): string {
   const n = typeof ms === "number" ? ms : Number(ms);
-  if (!Number.isFinite(n) || n <= 0) return "—";
+  if (!Number.isFinite(n) || n <= 0) return "\u2014";
   return new Date(n).toLocaleString();
 }
 
@@ -46,7 +46,7 @@ export function RequestDetail({
   const classNames = Array.isArray(className) ? className : [className];
 
   // Refetch the request by id while the detail is open, so status transitions
-  // (pending → inProgress → done) appear without re-clicking. The prop is the
+  // (pending -> inProgress -> done) appear without re-clicking. The prop is the
   // initial snapshot (from the list row); the query keeps it fresh.
   const { data } = useQuery({
     queryKey: ["request", request?.requestId],
@@ -91,7 +91,7 @@ export function RequestDetail({
     isRequestParked(req, parkedWorkers.data);
 
   function refFieldLabel(ref: AccountRef | null | undefined): string {
-    if (!ref) return "—";
+    if (!ref) return "\u2014";
     return ref.platform === "telegram"
       ? `telegram:${ref.id}`
       : `discord:${ref.id}`;
@@ -121,7 +121,7 @@ export function RequestDetail({
         value={
           req.orderedBy
             ? `${accounts.userLabelWithFallback(req.orderedBy)} (${refFieldLabel(req.orderedBy)})`
-            : "—"
+            : "\u2014"
         }
       />
       <Field
@@ -129,7 +129,7 @@ export function RequestDetail({
         value={
           req.orderedIn
             ? `${accounts.placeLabelWithFallback(req.orderedIn)} (${refFieldLabel(req.orderedIn)})`
-            : "—"
+            : "\u2014"
         }
       />
       {status.by && <Field label="By" value={authedLabel(status.by)} />}
@@ -148,7 +148,7 @@ export function RequestDetail({
         value={
           req.refusedBy.length > 0
             ? req.refusedBy.map(authedLabel).join(", ")
-            : "—"
+            : "\u2014"
         }
       />
 

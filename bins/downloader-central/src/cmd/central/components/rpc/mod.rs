@@ -1,16 +1,12 @@
 use std::{
     collections::HashMap,
-    sync::{Arc, LazyLock, Mutex, OnceLock, RwLock},
+    sync::{Arc, LazyLock, Mutex},
     time::{Duration, Instant},
 };
 
 use app_database::{
     Database,
-    api::{
-        authed::AuthedInfoResponse,
-        log_settings::{LogSettings, LogSettingsScope, resolve_log_settings},
-        secrets::SecretEntry,
-    },
+    api::authed::AuthedInfoResponse,
     entity::{accounts::Platform, authed::AuthedForRole},
 };
 use app_peer_comms::{
@@ -46,12 +42,11 @@ use app_peer_comms::{
         request::{Capabilities, CapabilitiesSummary, LogSettingsResult, SecretsResult},
     },
 };
-use arc_swap::ArcSwapOption;
 use futures::StreamExt;
 use tokio::{sync::Semaphore, task::JoinHandle};
 use tracing::{debug, error, info, instrument, warn};
 
-use crate::cmd::central::components::{metrics, rpc::session::SessionRegistry};
+use crate::cmd::central::components::{metrics, state::SharedCentralState};
 
 const INFLIGHT_LIMIT: usize = 64;
 const CAPABILITIES_TTL: Duration = Duration::from_secs(15);
@@ -107,138 +102,17 @@ mod session;
 pub use distributor::WorkDistributor;
 pub use restrictions::{AdmitDecision, RestrictionsManager, run as run_restrictions_watcher};
 pub use revocation::run as run_revocation_watcher;
-
-static SESSIONS: OnceLock<SessionRegistry> = OnceLock::new();
-
-pub fn sessions() -> &'static SessionRegistry {
-    SESSIONS
-        .get()
-        .expect("irpc session registry not initialized")
-}
-
-pub fn init_sessions() {
-    _ = SESSIONS.set(SessionRegistry::default());
-}
-
-static DISTRIBUTOR: LazyLock<ArcSwapOption<WorkDistributor>> = LazyLock::new(ArcSwapOption::empty);
-
-static INITIAL_DISTRIBUTOR_HANDLE: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
-
-pub fn init_distributor() {
-    let (handle, join) = WorkDistributor::spawn();
-    DISTRIBUTOR.store(Some(Arc::new(handle)));
-    *INITIAL_DISTRIBUTOR_HANDLE
-        .lock()
-        .expect("distributor handle lock poisoned") = Some(join);
-}
-
-pub fn take_initial_distributor_handle() -> Option<JoinHandle<()>> {
-    INITIAL_DISTRIBUTOR_HANDLE
-        .lock()
-        .expect("distributor handle lock poisoned")
-        .take()
-}
-
-pub fn respawn_distributor() -> JoinHandle<()> {
-    let (handle, join) = WorkDistributor::spawn();
-    DISTRIBUTOR.store(Some(Arc::new(handle)));
-    join
-}
-
-pub fn distributor() -> Arc<WorkDistributor> {
-    DISTRIBUTOR
-        .load_full()
-        .expect("work distributor not initialized")
-}
-
-static CENTRAL_ID: OnceLock<String> = OnceLock::new();
-static LOG_SETTINGS: OnceLock<RwLock<Vec<LogSettings>>> = OnceLock::new();
-
-pub fn init_log_settings() {
-    _ = LOG_SETTINGS.set(RwLock::new(Vec::new()));
-}
-
-pub fn set_log_settings(settings: Vec<LogSettings>) {
-    *LOG_SETTINGS
-        .get()
-        .expect("log settings not initialized")
-        .write()
-        .expect("log settings lock poisoned") = settings;
-}
-
-static SECRETS: OnceLock<RwLock<Vec<SecretEntry>>> = OnceLock::new();
-
-pub fn init_secrets() {
-    _ = SECRETS.set(RwLock::new(Vec::new()));
-}
-
-pub fn set_secrets(secrets: Vec<SecretEntry>) {
-    *SECRETS
-        .get()
-        .expect("secrets not initialized")
-        .write()
-        .expect("secrets lock poisoned") = secrets;
-}
-
-fn log_settings_for(role: &AuthedForRole) -> Option<app_peer_comms::rpc::request::LogSettings> {
-    let scope = match role {
-        AuthedForRole::Worker => LogSettingsScope::Worker,
-        AuthedForRole::Bot => LogSettingsScope::Bot,
-        AuthedForRole::Admin => return None,
-    };
-    let settings = LOG_SETTINGS
-        .get()
-        .expect("log settings not initialized")
-        .read()
-        .expect("log settings lock poisoned");
-    let effective = resolve_log_settings(&settings, scope);
-    drop(settings);
-    Some(app_peer_comms::rpc::request::LogSettings {
-        console: effective.console,
-        file: effective.file,
-    })
-}
-
-pub fn init_central_id(id: String) {
-    _ = CENTRAL_ID.set(id);
-}
-
-pub fn central_id() -> String {
-    CENTRAL_ID
-        .get()
-        .expect("central_id not initialized")
-        .clone()
-}
-
-static RESTRICTIONS: LazyLock<ArcSwapOption<RestrictionsManager>> =
-    LazyLock::new(ArcSwapOption::empty);
-
-pub fn init_restrictions() {
-    RESTRICTIONS.store(Some(Arc::new(RestrictionsManager::new())));
-}
-
-/// Returns the restrictions manager if initialized, else `None` (fail-open).
-pub fn restrictions() -> Option<Arc<RestrictionsManager>> {
-    RESTRICTIONS.load_full()
-}
+pub use session::SessionRegistry;
 
 #[derive(Clone, Debug)]
 pub struct CentralRpcServer {
-    registry: SessionRegistry,
+    state: SharedCentralState,
 }
 
 impl CentralRpcServer {
     #[must_use]
-    pub fn new() -> Self {
-        Self {
-            registry: sessions().clone(),
-        }
-    }
-}
-
-impl Default for CentralRpcServer {
-    fn default() -> Self {
-        Self::new()
+    pub const fn new(state: SharedCentralState) -> Self {
+        Self { state }
     }
 }
 
@@ -311,10 +185,12 @@ impl ProtocolHandler for CentralRpcServer {
         }
 
         if let Some((id, authed, _)) = session {
-            distributor().disconnect(id).await;
-            self.registry.unregister(id);
-            if let Err(e) = Database::global()
-                .connections_remove(central_id(), authed)
+            self.state.distributor().disconnect(id).await;
+            self.state.sessions.unregister(id);
+            if let Err(e) = self
+                .state
+                .db()
+                .connections_remove(self.state.central_id(), authed)
                 .await
             {
                 warn!(?e, "Failed to remove connection inventory row");
@@ -333,13 +209,15 @@ impl CentralRpcServer {
         version: String,
         conn: &Connection,
     ) -> AuthOutcome {
-        match Database::global().authed_get_info_by_token(api_key).await {
+        let db = self.state.db();
+        let central_id = self.state.central_id();
+        match db.authed_get_info_by_token(api_key).await {
             Ok(AuthedInfoResponse::Authorized(info)) => {
                 let caps_json = serde_json::to_string(&capabilities).ok();
                 let role: &'static str = (&info.for_role).into();
-                if let Err(e) = Database::global()
+                if let Err(e) = db
                     .connections_upsert(
-                        central_id(),
+                        central_id,
                         info.id.clone(),
                         role,
                         caps_json,
@@ -351,7 +229,7 @@ impl CentralRpcServer {
                 }
 
                 let role = info.for_role;
-                let id = self.registry.register(
+                let id = self.state.sessions.register(
                     info.id.clone(),
                     conn.clone(),
                     (&role).into(),
@@ -406,12 +284,13 @@ impl CentralRpcServer {
         let is_bot = matches!(role, AuthedForRole::Bot);
         let is_admin = matches!(role, AuthedForRole::Admin);
         metrics::rpc_request();
+        let db = self.state.db().clone();
         match req {
             CentralRequest::Auth(_) => unreachable!("Auth is handled in the accept loop"),
             CentralRequest::Heartbeat(r) => {
                 let WithChannels { tx, .. } = r;
-                if let Err(e) = Database::global()
-                    .connections_heartbeat(central_id(), authed_id)
+                if let Err(e) = db
+                    .connections_heartbeat(self.state.central_id(), authed_id)
                     .await
                 {
                     warn!(?e, "Failed to touch connection inventory row");
@@ -424,7 +303,10 @@ impl CentralRpcServer {
                     let _ = tx.send(GetWorkItemResult::Unauthorized).await;
                     return;
                 }
-                distributor().park(authed_id, session_id, tx).await;
+                self.state
+                    .distributor()
+                    .park(authed_id, session_id, tx)
+                    .await;
             }
             CentralRequest::RefuseWorkItem(r) => {
                 let WithChannels { inner, tx, .. } = r;
@@ -433,10 +315,7 @@ impl CentralRpcServer {
                     let _ = tx.send(FreeResult::Unauthorized { request_id }).await;
                     return;
                 }
-                match Database::global()
-                    .requests_refuse(request_id.clone(), authed_id)
-                    .await
-                {
+                match db.requests_refuse(request_id.clone(), authed_id).await {
                     Ok(db_result) => {
                         let wire: FreeResult = (request_id, db_result).into();
                         let _ = tx.send(wire).await;
@@ -454,10 +333,7 @@ impl CentralRpcServer {
                     let _ = tx.send(FreeResult::Unauthorized { request_id }).await;
                     return;
                 }
-                match Database::global()
-                    .requests_free(request_id.clone(), authed_id)
-                    .await
-                {
+                match db.requests_free(request_id.clone(), authed_id).await {
                     Ok(db_result) => {
                         let wire: FreeResult = (request_id, db_result).into();
                         let _ = tx.send(wire).await;
@@ -480,7 +356,7 @@ impl CentralRpcServer {
                         .await;
                     return;
                 }
-                match Database::global()
+                match db
                     .requests_update_status_message(
                         request_id.clone(),
                         authed_id,
@@ -515,7 +391,7 @@ impl CentralRpcServer {
                         .await;
                     return;
                 }
-                match Database::global()
+                match db
                     .requests_add_errors(request_id.clone(), authed_id, inner.errors)
                     .await
                 {
@@ -551,7 +427,7 @@ impl CentralRpcServer {
                     .into_iter()
                     .map(std::convert::Into::into)
                     .collect();
-                match Database::global()
+                match db
                     .requests_move_to_waiting_for_requester(
                         request_id.clone(),
                         authed_id,
@@ -586,7 +462,7 @@ impl CentralRpcServer {
                         .await;
                     return;
                 }
-                match Database::global()
+                match db
                     .requests_fail(request_id.clone(), authed_id, inner.reason.as_ref())
                     .await
                 {
@@ -611,7 +487,7 @@ impl CentralRpcServer {
                     let _ = tx.send(CreateResult::Unauthorized).await;
                     return;
                 }
-                if let Some(mgr) = restrictions() {
+                if let Some(mgr) = self.state.restrictions.load_full() {
                     match mgr.check(inner.ordered_by.as_ref(), inner.ordered_in.as_ref()) {
                         AdmitDecision::Allow => {}
                         AdmitDecision::Banned { reason } => {
@@ -624,7 +500,7 @@ impl CentralRpcServer {
                         }
                     }
                 }
-                match Database::global()
+                match db
                     .requests_add(
                         authed_id,
                         inner.info,
@@ -656,10 +532,7 @@ impl CentralRpcServer {
                         .await;
                     return;
                 }
-                match Database::global()
-                    .accounts_upsert(&inner.users, &inner.places)
-                    .await
-                {
+                match db.accounts_upsert(&inner.users, &inner.places).await {
                     Ok(result) => {
                         let _ = tx
                             .send(app_peer_comms::rpc::request::AccountsUpsertResult {
@@ -693,17 +566,11 @@ impl CentralRpcServer {
                         return;
                     }
                 };
-                match Database::global()
-                    .requests_get_available_account_refresh(platform)
-                    .await
-                {
+                match db.requests_get_available_account_refresh(platform).await {
                     Ok(items) => {
                         for item in items.iter() {
                             let req_id = item.request_id.clone();
-                            match Database::global()
-                                .requests_take(req_id.clone(), authed_id.clone())
-                                .await
-                            {
+                            match db.requests_take(req_id.clone(), authed_id.clone()).await {
                                 Ok(app_database::api::requests::TakeResult::Ok(box_req)) => {
                                     match box_req.as_ref().try_into() {
                                         Ok(wr) => {
@@ -718,9 +585,8 @@ impl CentralRpcServer {
                                                 ?req_id,
                                                 "account refresh convert failed; releasing"
                                             );
-                                            let _ = Database::global()
-                                                .requests_free(req_id, authed_id.clone())
-                                                .await;
+                                            let _ =
+                                                db.requests_free(req_id, authed_id.clone()).await;
                                         }
                                     }
                                 }
@@ -747,7 +613,7 @@ impl CentralRpcServer {
                     let _ = tx.send(CompleteAccountRefreshResult::Unauthorized).await;
                     return;
                 }
-                match Database::global()
+                match db
                     .requests_complete_account_refresh(inner.request_id.clone(), authed_id)
                     .await
                 {
@@ -768,10 +634,7 @@ impl CentralRpcServer {
                     let _ = tx.send(FinishResult::Unauthorized).await;
                     return;
                 }
-                match Database::global()
-                    .requests_finish(request_id, authed_id)
-                    .await
-                {
+                match db.requests_finish(request_id, authed_id).await {
                     Ok(db_result) => {
                         let wire: FinishResult = db_result.into();
                         let _ = tx.send(wire).await;
@@ -794,7 +657,7 @@ impl CentralRpcServer {
                         .await;
                     return;
                 }
-                spawn_watch_mine_in_progress(tx, authed_id, conn);
+                spawn_watch_mine_in_progress(self.state.clone(), tx, authed_id, conn);
             }
             CentralRequest::WorkRequestWait(r) => {
                 let WithChannels { inner, tx, .. } = r;
@@ -802,7 +665,14 @@ impl CentralRpcServer {
                     let _ = tx.send(WorkRequestWatchEvent::Unavailable).await;
                     return;
                 }
-                spawn_watch_request(tx, inner.request_id, inner.watch_id, authed_id, conn);
+                spawn_watch_request(
+                    self.state.clone(),
+                    tx,
+                    inner.request_id,
+                    inner.watch_id,
+                    authed_id,
+                    conn,
+                );
             }
             CentralRequest::WorkRequestListMineInProgress(r) => {
                 let WithChannels { tx, .. } = r;
@@ -816,10 +686,7 @@ impl CentralRpcServer {
                     return;
                 }
                 tokio::spawn(async move {
-                    match Database::global()
-                        .requests_get_mine_in_progress(authed_id)
-                        .await
-                    {
+                    match db.requests_get_mine_in_progress(authed_id).await {
                         Ok(list) => {
                             let requests = match list
                                 .iter()
@@ -863,7 +730,7 @@ impl CentralRpcServer {
                     let _ = tx.send(WorkRequestAckResult::Unauthorized).await;
                     return;
                 }
-                match Database::global()
+                match db
                     .requests_ack_delivery(request_id, authed_id.clone())
                     .await
                 {
@@ -890,7 +757,7 @@ impl CentralRpcServer {
                                     "decode files data after claim failed; releasing attempt"
                                 );
                                 let attempt: Arc<str> = delivery_attempt_id.into();
-                                let _ = Database::global()
+                                let _ = db
                                     .requests_release_delivery(
                                         inner.request_id.clone(),
                                         authed_id.clone(),
@@ -928,7 +795,7 @@ impl CentralRpcServer {
                     let _ = tx.send(WorkRequestFinishDeliveryResult::Unauthorized).await;
                     return;
                 }
-                match Database::global()
+                match db
                     .requests_finish_delivery(
                         request_id,
                         authed_id,
@@ -968,7 +835,7 @@ impl CentralRpcServer {
                     let _ = tx.send(WorkRequestFailDeliveryResult::Unauthorized).await;
                     return;
                 }
-                match Database::global()
+                match db
                     .requests_fail_delivery(
                         request_id,
                         authed_id,
@@ -1009,7 +876,7 @@ impl CentralRpcServer {
                         .await;
                     return;
                 }
-                match Database::global()
+                match db
                     .requests_release_delivery(
                         request_id,
                         authed_id,
@@ -1040,7 +907,7 @@ impl CentralRpcServer {
             }
             CentralRequest::GetCapabilities(r) => {
                 let WithChannels { tx, .. } = r;
-                let summary = aggregate_capabilities_cached().await;
+                let summary = aggregate_capabilities_cached(&db).await;
                 let _ = tx.send(summary).await;
             }
             CentralRequest::AdminListSessions(r) => {
@@ -1051,7 +918,7 @@ impl CentralRpcServer {
                         .await;
                     return;
                 }
-                let sessions = self.registry.list();
+                let sessions = self.state.sessions.list();
                 let _ = tx
                     .send(app_peer_comms::rpc::request::AdminSessionsResult::Ok(
                         sessions,
@@ -1066,7 +933,7 @@ impl CentralRpcServer {
                         .await;
                     return;
                 }
-                match distributor().list_parked().await {
+                match self.state.distributor().list_parked().await {
                     Some(workers) => {
                         let _ = tx
                             .send(app_peer_comms::rpc::request::AdminParkedWorkersResult::Ok(
@@ -1085,7 +952,10 @@ impl CentralRpcServer {
             }
             CentralRequest::GetLogSettings(r) => {
                 let WithChannels { tx, .. } = r;
-                let result = log_settings_for(&role)
+                let result = self
+                    .state
+                    .log_settings_for(&role)
+                    .await
                     .map_or(LogSettingsResult::Unauthorized, LogSettingsResult::Ok);
                 let _ = tx.send(result).await;
             }
@@ -1093,11 +963,7 @@ impl CentralRpcServer {
                 let WithChannels { tx, .. } = r;
                 let result = match role {
                     AuthedForRole::Worker => {
-                        let entries = SECRETS
-                            .get()
-                            .expect("secrets not initialized")
-                            .read()
-                            .expect("secrets lock poisoned");
+                        let entries = self.state.secrets.read().await;
                         SecretsResult::Ok(
                             entries
                                 .iter()
@@ -1118,7 +984,7 @@ impl CentralRpcServer {
     }
 }
 
-async fn aggregate_capabilities_cached() -> CapabilitiesSummary {
+async fn aggregate_capabilities_cached(db: &Database) -> CapabilitiesSummary {
     let value = CAPABILITIES_CACHE
         .lock()
         .expect("capabilities cache lock poisoned")
@@ -1130,19 +996,19 @@ async fn aggregate_capabilities_cached() -> CapabilitiesSummary {
         return summary;
     }
 
-    let summary = aggregate_capabilities().await;
+    let summary = aggregate_capabilities(db).await;
     *CAPABILITIES_CACHE
         .lock()
         .expect("capabilities cache lock poisoned") = Some((Instant::now(), summary.clone()));
     summary
 }
 
-async fn aggregate_capabilities() -> CapabilitiesSummary {
+async fn aggregate_capabilities(db: &Database) -> CapabilitiesSummary {
     use std::collections::HashSet;
 
     use app_peer_comms::rpc::request::HandlerEntry;
 
-    let rows = match Database::global().connections_list().await {
+    let rows = match db.connections_list().await {
         Ok(rows) => rows,
         Err(e) => {
             warn!(?e, "connections_list failed for capabilities aggregate");
@@ -1197,15 +1063,13 @@ async fn aggregate_capabilities() -> CapabilitiesSummary {
 }
 
 fn spawn_watch_mine_in_progress(
+    state: SharedCentralState,
     tx: app_peer_comms::irpc::channel::mpsc::Sender<WorkRequestSnapshot>,
     authed_id: Arc<str>,
     conn: Connection,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let stream = match Database::global()
-            .requests_watch_mine_in_progress(authed_id)
-            .await
-        {
+        let stream = match state.db().requests_watch_mine_in_progress(authed_id).await {
             Ok(s) => s,
             Err(e) => {
                 error!(?e, "watch mine in progress subscribe failed");
@@ -1279,8 +1143,14 @@ fn decode_files_data(
 /// capacity permits for its lifetime. Forwards requester-scoped Convex
 /// emissions as `WorkRequestWatchEvent::Request`, and terminates on receiver
 /// drop (`tx.closed()`), connection close, stream end, or stream error.
+struct WatchPermits {
+    _global: tokio::sync::OwnedSemaphorePermit,
+    _authed: tokio::sync::OwnedSemaphorePermit,
+}
+
 #[allow(clippy::significant_drop_tightening)]
 fn spawn_watch_request(
+    state: SharedCentralState,
     tx: app_peer_comms::irpc::channel::mpsc::Sender<WorkRequestWatchEvent>,
     request_id: app_peer_comms::message::v1::common::RequestId,
     watch_id: u64,
@@ -1311,14 +1181,18 @@ fn spawn_watch_request(
                 return;
             }
         };
+        let permits = WatchPermits {
+            _global: global_permit,
+            _authed: authed_permit,
+        };
         run_watch(
+            state,
             tx,
             request_id,
             watch_id,
             authed_id.clone(),
             conn,
-            global_permit,
-            authed_permit,
+            permits,
         )
         .await;
         reclaim_per_authed_watch_state(&authed_id, &authed_state);
@@ -1326,19 +1200,18 @@ fn spawn_watch_request(
 }
 
 async fn run_watch(
+    state: SharedCentralState,
     tx: app_peer_comms::irpc::channel::mpsc::Sender<WorkRequestWatchEvent>,
     request_id: app_peer_comms::message::v1::common::RequestId,
     watch_id: u64,
     authed_id: Arc<str>,
     conn: Connection,
-    // Held for the lifetime of this watch so the capacity pools stay
-    // reserved; released when this future returns.
-    _global_permit: tokio::sync::OwnedSemaphorePermit,
-    _authed_permit: tokio::sync::OwnedSemaphorePermit,
+    _permits: WatchPermits,
 ) {
     // Initial requester-scoped lookup. Unavailable covers both non-owner
     // and nonexistent requests so an authenticated bot cannot probe ids.
-    let initial = match Database::global()
+    let initial = match state
+        .db()
         .requests_get_mine_by_id(request_id.clone(), authed_id.clone())
         .await
     {
@@ -1353,13 +1226,14 @@ async fn run_watch(
             return;
         }
     };
-    if let Err(e) = send_request(&tx, &initial).await {
+    if let Err(e) = send_request(&state, &tx, &initial).await {
         error!(?e, watch_id, "watch request initial conversion failed");
         let _ = tx.send(WorkRequestWatchEvent::BackendError).await;
         return;
     }
 
-    let stream = match Database::global()
+    let stream = match state
+        .db()
         .requests_watch_mine_by_id(request_id, authed_id)
         .await
     {
@@ -1375,7 +1249,6 @@ async fn run_watch(
     loop {
         tokio::select! {
             biased;
-            // Connection torn down by the peer.
             closed = conn.closed() => {
                 debug!(?closed, watch_id, "watch request client disconnected");
                 return;
@@ -1391,7 +1264,7 @@ async fn run_watch(
                 let Some(emission) = emission else { return; };
                 match emission {
                     Ok(Some(row)) => {
-                        if let Err(e) = send_request(&tx, &row).await {
+                        if let Err(e) = send_request(&state, &tx, &row).await {
                             error!(?e, watch_id, "watch request conversion failed");
                             let _ = tx.send(WorkRequestWatchEvent::BackendError).await;
                             return;
@@ -1417,12 +1290,14 @@ async fn run_watch(
 }
 
 async fn send_request(
+    state: &crate::cmd::central::components::state::CentralState,
     tx: &app_peer_comms::irpc::channel::mpsc::Sender<WorkRequestWatchEvent>,
     row: &app_database::api::requests::RequestInfoResponse,
 ) -> Result<(), app_peer_comms::message::v1::central::work_request::request::WorkRequestError> {
     let mut work_request = std::convert::TryInto::<WorkRequest>::try_into(row)?;
     if matches!(work_request.status(), WorkRequestStatus::Pending) {
-        work_request.parked = distributor()
+        work_request.parked = state
+            .distributor()
             .is_refused_by_all_parked(&row.refused_by)
             .await
             .unwrap_or(false);

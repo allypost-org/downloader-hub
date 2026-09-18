@@ -1,13 +1,18 @@
-use axum::{Json, Router, routing::get};
+use std::sync::Arc;
+
+use app_database::Database;
+use app_peer_comms::PeeringEndpoint;
+use axum::{Extension, Json, Router, routing::get};
 use serde_json::json;
 
 pub mod root;
 
-pub fn create_v1_router() -> Router {
+pub fn create_v1_router(peering: Arc<PeeringEndpoint>) -> Router<Arc<Database>> {
     Router::new()
         .route("/join-ticket", get(root::get_join_ticket))
         .route("/connections", get(root::get_connections))
         .route("/metrics", get(root::get_metrics))
+        .layer(Extension(peering))
 }
 
 #[derive(Debug)]

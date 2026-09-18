@@ -13,7 +13,10 @@ use unicode_segmentation::UnicodeSegmentation;
 use url::Url;
 
 use super::{DownloadRequest, DownloadResult, Downloader, DownloaderError, DownloaderReturn};
-use crate::downloaders::{DownloaderOptions, helpers::headers::content_disposition};
+use crate::{
+    ActionCtx,
+    downloaders::{DownloaderOptions, helpers::headers::content_disposition},
+};
 
 pub const MAX_FILENAME_LENGTH: usize = 120;
 
@@ -31,7 +34,7 @@ impl Downloader for Generic {
         matches!(req.url.url().scheme(), "http" | "https")
     }
 
-    async fn download(&self, request: &DownloadRequest) -> DownloaderReturn {
+    async fn download(&self, _ctx: &ActionCtx, request: &DownloadRequest) -> DownloaderReturn {
         match self.download_one(request).await {
             Ok(x) => Ok(x),
             Err(DownloaderError::Error(e)) if request.fallibility().can_fail() => {

@@ -10,34 +10,34 @@ use tokio::task::JoinSet;
 use tracing::debug;
 
 use super::config::CentralConfig;
-use crate::cmd::central::components::rpc::CentralRpcServer;
+use crate::cmd::central::components::{rpc::CentralRpcServer, state::SharedCentralState};
 
 pub mod database;
 pub mod metrics;
 pub mod peers;
 pub mod rpc;
+pub mod state;
 pub mod worker_api;
 
 pub async fn spawn(
     config: CentralConfig,
+    state: SharedCentralState,
 ) -> Result<JoinSet<(&'static str, ComponentResult)>, Box<dyn std::error::Error + Send + Sync>> {
     let mut js = JoinSet::new();
 
-    rpc::init_sessions();
-    rpc::init_distributor();
-    rpc::init_restrictions();
-    rpc::init_log_settings();
-    rpc::init_secrets();
+    let (handle, join) = rpc::WorkDistributor::spawn(state.db().clone());
+    state.set_distributor(handle, join);
+    state
+        .restrictions
+        .store(Some(Arc::new(rpc::RestrictionsManager::new())));
 
-    init_peering(config.peer).await?;
-
-    rpc::init_central_id(PeeringEndpoint::global().endpoint_id().await.to_string());
+    init_peering(config.peer, state.clone()).await?;
 
     js.spawn(keep_running(
         "Database",
         {
-            let db_config = config.database.clone();
-            Box::new(move || database::run(db_config.clone()))
+            let state = state.clone();
+            Box::new(move || database::run(state.clone()))
         },
         RetryConfig::new()
             .with_retry_delays(RETRY_DELAYS.clone())
@@ -46,16 +46,20 @@ pub async fn spawn(
 
     js.spawn(keep_running(
         "Peers",
-        Box::new(peers::run),
+        {
+            let state = state.clone();
+            Box::new(move || peers::run(state.clone()))
+        },
         RetryConfig::new()
             .with_retry_delays(RETRY_DELAYS.clone())
             .with_reset_retries_after(Some(FIVE_MINS)),
     ));
 
     js.spawn({
+        let state = state.clone();
         keep_running(
             "Worker API",
-            Box::new(move || worker_api::run(config.worker_api.clone(), config.database.clone())),
+            Box::new(move || worker_api::run(config.worker_api.clone(), state.clone())),
             RetryConfig::new()
                 .with_retry_delays(RETRY_DELAYS.clone())
                 .with_reset_retries_after(Some(FIVE_MINS)),
@@ -87,6 +91,7 @@ static FIVE_MINS: Duration = Duration::from_mins(5);
 
 async fn init_peering(
     config: PeerCommsCentralConfig,
+    state: SharedCentralState,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let topic_id = config.topic_id.map_or_else(
         || {
@@ -101,14 +106,16 @@ async fn init_peering(
         },
     );
 
+    let hook_state = state.clone();
     let pe = PeeringEndpoint::builder(config.common, topic_id)
-        .with_router_hook(|b| b.accept(RPC_ALPN, CentralRpcServer::new()))
+        .with_router_hook(move |b| b.accept(RPC_ALPN, CentralRpcServer::new(hook_state)))
         .build()
         .await?;
 
-    PeeringEndpoint::init(pe)
-        .map(|_| ())
-        .map_err(std::convert::Into::into)
+    let pe = Arc::new(pe);
+    let _ = state.peering.set(pe.clone());
+    let _ = state.central_id.set(pe.endpoint_id().await.to_string());
+    Ok(())
 }
 
 pub type ComponentError = Box<dyn std::error::Error + Send + Sync>;

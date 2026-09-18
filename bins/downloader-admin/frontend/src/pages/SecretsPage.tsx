@@ -69,7 +69,7 @@ export function SecretsPage() {
         <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
           Per-platform cookies used by workers for authenticated downloads
           (e.g. age-gated Instagram posts). Named by platform; workers match by
-          URL host. Optionally restrict a secret to specific users/places —
+          URL host. Optionally restrict a secret to specific users/places -
           empty lists mean anyone.
         </p>
       </div>
@@ -151,7 +151,7 @@ export function SecretsPage() {
         </CardHeader>
         <CardContent>
           {list.isLoading ? (
-            <p className="text-muted-foreground">Loading…</p>
+            <p className="text-muted-foreground">Loading&hellip;</p>
           ) : list.data && list.data.length > 0 ? (
             <div className="space-y-3">
               {list.data.map((secret) => (
@@ -271,7 +271,7 @@ function RefList({
                 className="ml-0.5 text-muted-foreground hover:text-foreground disabled:opacity-50"
                 aria-label={`Remove ${r.platform} ${r.id}`}
               >
-                ×
+                &times;
               </button>
             </Badge>
           ))}

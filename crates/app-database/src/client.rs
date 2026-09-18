@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::OnceLock};
+use std::collections::BTreeMap;
 
 use app_config::common::DatabaseConfig;
 use convex::{ConvexClient, ConvexClientBuilder, FunctionResult, WebSocketState};
@@ -7,36 +7,11 @@ use tracing::{debug, instrument, trace};
 
 use crate::error::{DatabaseError, ResponseError};
 
-static GLOBAL: OnceLock<Database> = OnceLock::new();
-
 pub struct Database {
     client: ConvexClient,
 }
 
 impl Database {
-    pub fn global() -> &'static Self {
-        GLOBAL.get().expect("Global database not initialized")
-    }
-
-    pub async fn init(cfg: DatabaseConfig) -> Result<(), DatabaseError> {
-        if GLOBAL.get().is_some() {
-            trace!("Database already initialized");
-            return Err(DatabaseError::AlreadyInitialized);
-        }
-
-        trace!("Initializing database");
-
-        let res = GLOBAL
-            .set(Self::new(cfg).await?)
-            .map_err(|_| DatabaseError::AlreadyInitialized);
-
-        if res.is_ok() {
-            debug!("Database initialized");
-        }
-
-        res
-    }
-
     #[instrument(name = "new_database_client", skip_all)]
     pub async fn new(cfg: DatabaseConfig) -> Result<Self, DatabaseError> {
         trace!(config = ?cfg, "Creating new database client");

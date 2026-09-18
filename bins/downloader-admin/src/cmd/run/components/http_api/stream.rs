@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use app_database::Database;
 use axum::{
     extract::{
@@ -28,18 +30,18 @@ pub struct LiveSnapshots {
 }
 
 impl LiveSnapshots {
-    pub fn spawn() -> Self {
+    pub fn spawn(db: Arc<Database>) -> Self {
         let (counts_tx, counts_rx) = watch::channel(serde_json::Value::Null);
         let (failed_tx, failed_rx) = watch::channel(serde_json::Value::Null);
         let (names_tx, names_rx) = watch::channel(serde_json::Value::Null);
         let (account_names_tx, account_names_rx) = watch::channel(serde_json::Value::Null);
         let (requests_changed_tx, requests_changed_rx) = watch::channel(serde_json::Value::Null);
 
-        tokio::spawn(run_counts_watch(counts_tx));
-        tokio::spawn(run_failed_watch(failed_tx));
-        tokio::spawn(run_authed_names_watch(names_tx));
-        tokio::spawn(run_account_names_watch(account_names_tx));
-        tokio::spawn(run_requests_changed_watch(requests_changed_tx));
+        tokio::spawn(run_counts_watch(db.clone(), counts_tx));
+        tokio::spawn(run_failed_watch(db.clone(), failed_tx));
+        tokio::spawn(run_authed_names_watch(db.clone(), names_tx));
+        tokio::spawn(run_account_names_watch(db.clone(), account_names_tx));
+        tokio::spawn(run_requests_changed_watch(db, requests_changed_tx));
 
         Self {
             counts: counts_rx,
@@ -51,8 +53,8 @@ impl LiveSnapshots {
     }
 }
 
-async fn run_counts_watch(tx: watch::Sender<serde_json::Value>) {
-    let mut stream = match Database::global().requests_watch_counts().await {
+async fn run_counts_watch(db: Arc<Database>, tx: watch::Sender<serde_json::Value>) {
+    let mut stream = match db.requests_watch_counts().await {
         Ok(s) => s,
         Err(e) => {
             warn!(?e, "failed to start counts watch");
@@ -72,16 +74,15 @@ async fn run_counts_watch(tx: watch::Sender<serde_json::Value>) {
     warn!("counts watch stream ended");
 }
 
-async fn run_failed_watch(tx: watch::Sender<serde_json::Value>) {
-    // The recent-failed list watch used to use `requests_watch_by_status`,
-    // which was removed when the list query became paginated. We now poll the
-    // paginated query on a timer — fine for the dashboard's 5-row preview.
+async fn run_failed_watch(db: Arc<Database>, tx: watch::Sender<serde_json::Value>) {
+    // Polled on a timer rather than watched - the list query is paginated, so
+    // there's no watch to subscribe to. Fine for the dashboard's 5-row preview.
     debug!("started recent-failed watch (polled)");
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
     interval.tick().await; // immediate first tick
     loop {
         interval.tick().await;
-        match Database::global()
+        match db
             .requests_get_by_status(
                 app_database::api::requests::RequestStatusType::Failed,
                 Some(RECENT_FAILED_LIMIT),
@@ -103,8 +104,8 @@ async fn run_failed_watch(tx: watch::Sender<serde_json::Value>) {
 /// changes. Watches the full list directly (Convex emits only on a genuine
 /// result change), so there is no per-tick re-fetch. Identical maps are
 /// deduplicated to avoid pushing no-op updates.
-async fn run_authed_names_watch(tx: watch::Sender<serde_json::Value>) {
-    let mut stream = match Database::global().authed_watch_full().await {
+async fn run_authed_names_watch(db: Arc<Database>, tx: watch::Sender<serde_json::Value>) {
+    let mut stream = match db.authed_watch_full().await {
         Ok(s) => s,
         Err(e) => {
             warn!(?e, "failed to start authed-names watch");
@@ -142,8 +143,8 @@ async fn run_authed_names_watch(tx: watch::Sender<serde_json::Value>) {
 /// Pushes a `{ users: { "<platform>:<id>": label }, places: { key: label } }`
 /// map whenever the account metadata snapshot changes. Used by the SPA to
 /// resolve `orderedBy`/`orderedIn` refs to display names.
-async fn run_account_names_watch(tx: watch::Sender<serde_json::Value>) {
-    let mut stream = match Database::global().accounts_watch_for_stream().await {
+async fn run_account_names_watch(db: Arc<Database>, tx: watch::Sender<serde_json::Value>) {
+    let mut stream = match db.accounts_watch_for_stream().await {
         Ok(s) => s,
         Err(e) => {
             warn!(?e, "failed to start account-names watch");
@@ -204,8 +205,8 @@ async fn run_account_names_watch(tx: watch::Sender<serde_json::Value>) {
 /// Convex re-emits the watch on internal re-evaluations even when the value is
 /// unchanged, so emissions are deduplicated on the `lastModified` value to
 /// avoid hammering the client with refetch pings.
-async fn run_requests_changed_watch(tx: watch::Sender<serde_json::Value>) {
-    let mut stream = match Database::global().requests_watch_latest_change().await {
+async fn run_requests_changed_watch(db: Arc<Database>, tx: watch::Sender<serde_json::Value>) {
+    let mut stream = match db.requests_watch_latest_change().await {
         Ok(s) => s,
         Err(e) => {
             warn!(?e, "failed to start requests-changed watch");
@@ -360,7 +361,7 @@ async fn send_snapshot(
     kind: SnapshotKind,
 ) -> Result<(), axum::Error> {
     let data = rx.borrow().clone();
-    // RequestsChanged legitimately emits null (no requests yet) — push it
+    // RequestsChanged legitimately emits null (no requests yet) - push it
     // anyway so the client sees the initial state. Other channels skip null
     // until their first real emission.
     let allow_null = matches!(kind, SnapshotKind::RequestsChanged);

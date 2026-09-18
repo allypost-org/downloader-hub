@@ -68,7 +68,7 @@ function requestsFilterHref(target: RequestsTarget): string {
 
 function formatTime(ms: string | number): string {
   const n = typeof ms === "string" ? Number(ms) : ms;
-  if (!Number.isFinite(n) || n <= 0) return "—";
+  if (!Number.isFinite(n) || n <= 0) return "\u2014";
   return new Date(n).toLocaleString();
 }
 
@@ -161,7 +161,7 @@ function AccountUserFields({
         disabled={readonly || mutation.isPending}
         onClick={() => mutation.mutate()}
       >
-        {mutation.isPending ? "Saving…" : "Save account"}
+        {mutation.isPending ? "Saving\u2026" : "Save account"}
       </Button>
       <p className="text-xs text-muted-foreground">
         Leave a field blank to clear it. Only changed fields are sent.
@@ -250,7 +250,7 @@ function AccountPlaceFields({
         disabled={readonly || mutation.isPending}
         onClick={() => mutation.mutate()}
       >
-        {mutation.isPending ? "Saving…" : "Save account"}
+        {mutation.isPending ? "Saving\u2026" : "Save account"}
       </Button>
       <p className="text-xs text-muted-foreground">
         Leave a field blank to clear it. Only changed fields are sent.
@@ -262,7 +262,7 @@ function AccountPlaceFields({
 /**
  * Restrictions that apply to a specific account (user or place), shown and
  * editable inside the account modal. An "add restriction" form is auto-scoped
- * to the account — no user/place picker needed.
+ * to the account - no user/place picker needed.
  */
 function AccountRestrictions({
   kind,
@@ -335,7 +335,7 @@ function AccountRestrictions({
                   <span className="text-sm">{restrictionDetail(r.rule)}</span>
                   {!direct && (
                     <span className="ml-1.5 text-xs text-muted-foreground">
-                      (wildcard{other ? ` · also scoped to ${kind === "user" ? "place" : "user"} ${refKey(other)}` : ""})
+                      (wildcard{other ? ` \u00b7 also scoped to ${kind === "user" ? "place" : "user"} ${refKey(other)}` : ""})
                     </span>
                   )}
                 </div>
@@ -434,7 +434,7 @@ function EditRestrictionInline({
         disabled={readonly || save.isPending}
         onClick={() => save.mutate()}
       >
-        {save.isPending ? "Saving…" : "Save rule"}
+        {save.isPending ? "Saving\u2026" : "Save rule"}
       </Button>
     </div>
   );
@@ -546,7 +546,7 @@ function AddRestrictionScoped({
             disabled={readonly || create.isPending}
             onClick={() => create.mutate()}
           >
-            {create.isPending ? "Creating…" : "Add"}
+            {create.isPending ? "Creating\u2026" : "Add"}
           </Button>
         </>
       )}
@@ -627,20 +627,20 @@ export function AccountsPage() {
       header: "Username",
       cell: ({ row }) => (
         <span className="font-mono text-xs">
-          {row.original.username ?? "—"}
+          {row.original.username ?? "\u2014"}
         </span>
       ),
     },
     {
       accessorKey: "displayName",
       header: "Display name",
-      cell: ({ row }) => row.original.displayName ?? "—",
+      cell: ({ row }) => row.original.displayName ?? "\u2014",
     },
     {
       accessorKey: "isBot",
       header: "Bot",
       cell: ({ row }) =>
-        row.original.isBot ? <Badge variant="warning">bot</Badge> : "—",
+        row.original.isBot ? <Badge variant="warning">bot</Badge> : "\u2014",
     },
     {
       accessorKey: "lastSeen",
@@ -713,20 +713,20 @@ export function AccountsPage() {
         row.original.kind ? (
           <Badge variant="outline">{row.original.kind}</Badge>
         ) : (
-          "—"
+          "\u2014"
         ),
     },
     {
       accessorKey: "name",
       header: "Name",
-      cell: ({ row }) => row.original.name ?? "—",
+      cell: ({ row }) => row.original.name ?? "\u2014",
     },
     {
       accessorKey: "username",
       header: "Username",
       cell: ({ row }) => (
         <span className="font-mono text-xs">
-          {row.original.username ?? "—"}
+          {row.original.username ?? "\u2014"}
         </span>
       ),
     },
@@ -735,7 +735,7 @@ export function AccountsPage() {
       header: "Parent",
       cell: ({ row }) => (
         <span className="font-mono text-xs">
-          {row.original.parentPlatformId ?? "—"}
+          {row.original.parentPlatformId ?? "\u2014"}
         </span>
       ),
     },
@@ -809,7 +809,7 @@ export function AccountsPage() {
                   }
                 }}
               >
-                {refreshStale.isPending ? "Starting…" : "Refresh stale"}
+                {refreshStale.isPending ? "Starting\u2026" : "Refresh stale"}
               </Button>
               <Button
                 size="sm"
@@ -825,14 +825,14 @@ export function AccountsPage() {
                   }
                 }}
               >
-                {backfill.isPending ? "Starting…" : "Backfill refs"}
+                {backfill.isPending ? "Starting\u2026" : "Backfill refs"}
               </Button>
             </div>
           </CardTitle>
           <p className="text-sm text-muted-foreground">
             End-users and chats/servers seen by the bots. Refreshed by bots on
-            each message — metadata for inactive entities may be stale. Use
-            “Refresh” to queue a bot metadata fetch, “Edit” to correct a row
+            each message &mdash; metadata for inactive entities may be stale. Use
+            &ldquo;Refresh&rdquo; to queue a bot metadata fetch, &ldquo;Edit&rdquo; to correct a row
             manually, and manage restrictions from the edit dialog.
           </p>
         </CardHeader>
@@ -952,7 +952,7 @@ export function AccountsPage() {
                     : `Requests in ${requestsTarget.label}`}
                 </DialogTitle>
                 <DialogDescription>
-                  {requestsTarget.platform}:{requestsTarget.platformId} — all
+                  {requestsTarget.platform}:{requestsTarget.platformId} &mdash; all
                   statuses, newest first. Legacy rows without refs are omitted.
                 </DialogDescription>
               </DialogHeader>

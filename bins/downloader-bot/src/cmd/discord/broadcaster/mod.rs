@@ -1,10 +1,8 @@
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use serenity::all::{ChannelId, CreateMessage, EditMessage, Message, ReactionType};
 use tokio::sync::broadcast;
 use tracing::trace;
-
-static BROADCASTER: OnceLock<MessageBroadcaster> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 pub struct Broadcast {
@@ -61,6 +59,7 @@ impl From<(Message, ReactionType)> for BroadcastData {
     }
 }
 
+#[derive(Clone)]
 pub struct MessageBroadcaster {
     send: broadcast::Sender<Broadcast>,
 }
@@ -70,23 +69,6 @@ impl MessageBroadcaster {
         Self {
             send: broadcast::channel::<Broadcast>(60).0,
         }
-    }
-
-    pub fn init() -> Result<(), &'static str> {
-        BROADCASTER
-            .set(Self::new())
-            .map_err(|_| "Failed to init broadcaster")
-    }
-
-    pub fn get() -> &'static Self {
-        BROADCASTER.get().expect("Broadcaster not initialized")
-    }
-
-    pub fn send<T>(msg: T)
-    where
-        T: Into<Broadcast>,
-    {
-        Self::get().send_message(msg);
     }
 
     pub fn send_message<T>(&self, msg: T)

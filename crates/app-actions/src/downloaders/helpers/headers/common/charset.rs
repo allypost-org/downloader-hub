@@ -11,55 +11,30 @@ use self::Charset::*;
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
 pub enum Charset {
-    /// US ASCII
     Us_Ascii,
-    /// ISO-8859-1
     Iso_8859_1,
-    /// ISO-8859-2
     Iso_8859_2,
-    /// ISO-8859-3
     Iso_8859_3,
-    /// ISO-8859-4
     Iso_8859_4,
-    /// ISO-8859-5
     Iso_8859_5,
-    /// ISO-8859-6
     Iso_8859_6,
-    /// ISO-8859-7
     Iso_8859_7,
-    /// ISO-8859-8
     Iso_8859_8,
-    /// ISO-8859-9
     Iso_8859_9,
-    /// ISO-8859-10
     Iso_8859_10,
-    /// `Shift_JIS`
     Shift_Jis,
-    /// EUC-JP
     Euc_Jp,
-    /// ISO-2022-KR
     Iso_2022_Kr,
-    /// EUC-KR
     Euc_Kr,
-    /// ISO-2022-JP
     Iso_2022_Jp,
-    /// ISO-2022-JP-2
     Iso_2022_Jp_2,
-    /// ISO-8859-6-E
     Iso_8859_6_E,
-    /// ISO-8859-6-I
     Iso_8859_6_I,
-    /// ISO-8859-8-E
     Iso_8859_8_E,
-    /// ISO-8859-8-I
     Iso_8859_8_I,
-    /// GB2312
     Gb2312,
-    /// Big5
     Big5,
-    /// KOI8-R
     Koi8_R,
-    /// UTF-8
     Utf_8,
     /// An arbitrary charset specified as a string
     Ext(String),

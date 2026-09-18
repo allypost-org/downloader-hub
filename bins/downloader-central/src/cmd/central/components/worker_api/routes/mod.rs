@@ -1,5 +1,7 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
+use app_database::Database;
+use app_peer_comms::PeeringEndpoint;
 use axum::{
     Router,
     http::{HeaderValue, Request, Response, header},
@@ -23,12 +25,17 @@ pub struct RouterConfig {
     pub request_ip_source: ClientIpSource,
 }
 
-pub fn create_router(conf: &RouterConfig) -> Router {
+pub fn create_router(
+    conf: &RouterConfig,
+    db: Arc<Database>,
+    peering: Arc<PeeringEndpoint>,
+) -> Router {
     add_middlewares(
         conf,
         Router::new()
             .route("/health", get(v1::root::get_health))
-            .nest("/api/v1", v1::create_v1_router()),
+            .nest("/api/v1", v1::create_v1_router(peering))
+            .with_state(db),
     )
 }
 

@@ -4,6 +4,6 @@ Cron-style task runner. `downloader-worker` spawns `TaskRunner::run()` alongside
 
 ## Layout
 
-- `src/lib.rs` — `TaskRunner::run()` spawns a blocking thread that runs the cron schedule.
-- `src/config.rs` — `init(TaskConfig)` sets the global cron config; must be called before `run()`.
-- `src/cron/` — the actual scheduled jobs.
+- `src/lib.rs` - `TaskRunner::run()` spawns a blocking thread that runs the cron schedule.
+- `src/config.rs` - `init(TaskConfig)` sets the global cron config; must be called before `run()`.
+- `src/cron/` - the actual scheduled jobs.

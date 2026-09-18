@@ -1,3 +1,4 @@
+use app_config::BootConfig;
 use app_helpers::futures::run_future;
 use tracing::{Level, debug, trace};
 
@@ -44,9 +45,7 @@ fn main() {
         }
     }
 
-    let _ = app_helpers::config::init(config.dependency_paths.clone());
-
-    trace!(config = ?*config, "Running with config");
+    trace!(config = ?config, "Running with config");
     debug!(
         app_name = config::Config::app_name_with_version(),
         app_version = config::Config::app_version(),
@@ -55,7 +54,7 @@ fn main() {
         "Build info"
     );
 
-    run_future(async_main(config.clone()));
+    run_future(async_main(config));
 }
 
 async fn async_main(
@@ -64,9 +63,10 @@ async fn async_main(
     let capabilities = app_peer_comms::rpc::request::Capabilities::Bot {
         platform: config.cmd.platform().to_string(),
     };
-    peering::init_peering_endpoint(config.peer, capabilities).await?;
+    let rpc = peering::init_peering_endpoint(config.peer, capabilities).await?;
+    let dependency_paths = std::sync::Arc::new(config.dependency_paths.clone());
 
-    cmd::run(config.cmd).await;
+    cmd::run(config.cmd, rpc, dependency_paths).await;
 
     Ok(())
 }

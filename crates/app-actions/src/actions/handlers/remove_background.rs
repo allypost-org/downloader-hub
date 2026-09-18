@@ -17,6 +17,7 @@ use tokio_util::codec::{BytesCodec, FramedRead};
 use tracing::{trace, warn};
 
 use crate::{
+    ActionCtx,
     actions::{Action, ActionError, ActionRequest, ActionResult},
     fixers::{FixRequest, Fixer, handlers::crop_image::CropImage},
 };
@@ -45,7 +46,11 @@ impl Action for RemoveBackground {
         matches!(file_mime.type_(), mime::IMAGE)
     }
 
-    async fn run(&self, request: &ActionRequest) -> Result<ActionResult, ActionError> {
+    async fn run(
+        &self,
+        ctx: &ActionCtx,
+        request: &ActionRequest,
+    ) -> Result<ActionResult, ActionError> {
         trace!("Running remove background action");
         let output_file_path = request
             .output_dir
@@ -132,7 +137,9 @@ impl Action for RemoveBackground {
         })?;
         trace!("File flushed");
 
-        let res = CropImage.run(&FixRequest::new(&output_file_path)).await;
+        let res = CropImage
+            .run(ctx, &FixRequest::new(&output_file_path))
+            .await;
 
         if let Ok(res) = res {
             if let Err(e) = tokio::fs::remove_file(&output_file_path).await {

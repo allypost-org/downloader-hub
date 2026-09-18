@@ -14,7 +14,7 @@
   "type": "commonjs",
   "dependencies": {
     "@convex-dev/aggregate": "^0.2.2",
-    "convex": "^1.41.0",
+    "convex": "^1.45.0",
     "convex-helpers": "^0.1.105",
     "lodash": "^4.17.21"
   },

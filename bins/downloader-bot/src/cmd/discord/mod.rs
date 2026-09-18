@@ -5,19 +5,24 @@ use serenity::{Client, all::GatewayIntents};
 use tracing::{debug, error, info, instrument};
 
 use super::CmdResult;
-use crate::cmd::discord::{bot::discord_bot::DiscordBot, config::DiscordConfig};
+use crate::{
+    cmd::discord::{
+        bot::discord_bot::{DiscordBot, DiscordBotKey},
+        config::DiscordConfig,
+    },
+    peering::rpc::RpcClient,
+};
 
 mod bot;
 pub mod broadcaster;
 pub mod config;
 
 #[instrument(name = "discord", skip_all)]
-pub async fn run(config: DiscordConfig) -> CmdResult {
-    _ = broadcaster::MessageBroadcaster::init();
-
+pub async fn run(config: DiscordConfig, rpc: Arc<RpcClient>) -> CmdResult {
     info!("Starting discord bot...");
 
     let bot_config = Arc::new(config.bot.clone());
+    let broadcaster = broadcaster::MessageBroadcaster::new();
 
     let intents = GatewayIntents::non_privileged()
         | GatewayIntents::GUILD_MESSAGES
@@ -50,18 +55,30 @@ pub async fn run(config: DiscordConfig) -> CmdResult {
 
                 paragraphs.join("\n\n")
             }),
+            broadcaster: broadcaster.clone(),
+            rpc: Arc::clone(&rpc),
         }))
         .await?;
 
-    DiscordBot::init(client.http.clone(), bot_config);
+    let discord_bot = Arc::new(DiscordBot::new(client.http.clone(), bot_config.clone()));
+    client
+        .data
+        .write()
+        .await
+        .insert::<DiscordBotKey>(Arc::clone(&discord_bot));
 
-    tokio::task::spawn(async {
-        crate::cmd::_common::account_refresh::run_refresh_loop(
-            Platform::Discord,
-            bot::helpers::account::fetch_user_fut,
-            bot::helpers::account::fetch_place_fut,
-        )
-        .await;
+    tokio::task::spawn({
+        let rpc = Arc::clone(&rpc);
+        let discord_bot = Arc::clone(&discord_bot);
+        async {
+            crate::cmd::_common::account_refresh::run_refresh_loop(
+                rpc,
+                Platform::Discord,
+                bot::helpers::account::fetch_user_fut(Arc::clone(&discord_bot)),
+                bot::helpers::account::fetch_place_fut(discord_bot),
+            )
+            .await;
+        }
     });
 
     if let Err(e) = client.start_autosharded().await {

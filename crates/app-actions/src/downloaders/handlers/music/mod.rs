@@ -8,7 +8,10 @@ use tracing::warn;
 use url::Url;
 
 use super::{DownloadRequest, Downloader, DownloaderReturn};
-use crate::downloaders::{DownloadResult, DownloaderError};
+use crate::{
+    ActionCtx,
+    downloaders::{DownloadResult, DownloaderError},
+};
 
 static HANDLERS: LazyLock<Vec<DownloadHandler>> = LazyLock::new(|| {
     vec![
@@ -35,7 +38,7 @@ impl Downloader for Music {
         Self::supports(request.url.url())
     }
 
-    async fn download(&self, req: &DownloadRequest) -> DownloaderReturn {
+    async fn download(&self, ctx: &ActionCtx, req: &DownloadRequest) -> DownloaderReturn {
         let song_url = req.url.url();
 
         for handler in HANDLERS.iter() {
@@ -43,7 +46,7 @@ impl Downloader for Music {
                 continue;
             }
 
-            match handler.download(req).await {
+            match handler.download(ctx, req).await {
                 Ok(path) => {
                     return Ok(DownloadResult {
                         path,
@@ -97,14 +100,19 @@ impl DownloadHandler {
         self.provider.enabled()
     }
 
-    pub async fn download(&self, request: &DownloadRequest) -> Result<PathBuf, anyhow::Error> {
-        self.provider.download(request).await
+    pub async fn download(
+        &self,
+        ctx: &ActionCtx,
+        request: &DownloadRequest,
+    ) -> Result<PathBuf, anyhow::Error> {
+        self.provider.download(ctx, request).await
     }
 }
 
 #[async_trait::async_trait]
 trait Handler: std::fmt::Debug + Send + Sync {
-    async fn download(&self, request: &DownloadRequest) -> anyhow::Result<PathBuf>;
+    async fn download(&self, ctx: &ActionCtx, request: &DownloadRequest)
+    -> anyhow::Result<PathBuf>;
 
     fn supports(&self, song_url: &Url) -> bool;
 

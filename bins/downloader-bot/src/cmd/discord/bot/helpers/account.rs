@@ -1,4 +1,4 @@
-use std::{future::Future, pin::Pin};
+use std::sync::Arc;
 
 use app_database::entity::accounts::{
     AccountPlace, AccountPlaceRef, AccountUser, AccountUserRef, Platform,
@@ -9,8 +9,8 @@ use serenity::{
 };
 
 use super::super::discord_bot::DiscordBot;
+use crate::cmd::_common::account_refresh::{PlaceFetchFut, UserFetchFut};
 
-/// Build the end-user snapshot + ref from the message author.
 #[must_use]
 pub fn user_from_author(author: &serenity::all::User) -> (AccountUser, AccountUserRef) {
     let id = author.id.to_string();
@@ -116,7 +116,6 @@ const fn channel_kind_str(kind: serenity::all::ChannelType) -> &'static str {
     }
 }
 
-/// Convenience wrapper used by the message handler.
 pub fn from_message(
     msg: &serenity::all::Message,
     cache: &Cache,
@@ -134,36 +133,45 @@ pub fn from_message(
     (user, places, Some(place_ref))
 }
 
-pub fn fetch_user_fut(
-    platform_id: &str,
-) -> Pin<Box<dyn Future<Output = Result<AccountUser, String>> + Send>> {
-    let id = platform_id.to_string();
-    Box::pin(async move { fetch_user_by_platform_id(&id).await })
+pub fn fetch_user_fut(bot: Arc<DiscordBot>) -> impl Fn(&str) -> UserFetchFut {
+    move |platform_id| {
+        let id = platform_id.to_string();
+        let bot = bot.clone();
+        Box::pin(async move { fetch_user_by_platform_id(&bot, &id).await })
+    }
 }
 
-pub fn fetch_place_fut(
-    platform_id: &str,
-) -> Pin<Box<dyn Future<Output = Result<AccountPlace, String>> + Send>> {
-    let id = platform_id.to_string();
-    Box::pin(async move { fetch_place_by_platform_id(&id).await })
+pub fn fetch_place_fut(bot: Arc<DiscordBot>) -> impl Fn(&str) -> PlaceFetchFut {
+    move |platform_id| {
+        let id = platform_id.to_string();
+        let bot = bot.clone();
+        Box::pin(async move { fetch_place_by_platform_id(&bot, &id).await })
+    }
 }
 
-pub async fn fetch_user_by_platform_id(platform_id: &str) -> Result<AccountUser, String> {
+pub async fn fetch_user_by_platform_id(
+    bot: &DiscordBot,
+    platform_id: &str,
+) -> Result<AccountUser, String> {
     let id = platform_id
         .parse::<u64>()
         .map_err(|_| format!("invalid discord user id: {platform_id}"))?;
-    let user = DiscordBot::bot()
+    let user = bot
+        .bot()
         .get_user(UserId::new(id))
         .await
         .map_err(|e| format!("get_user failed: {e}"))?;
     Ok(user_from_author(&user).0)
 }
 
-pub async fn fetch_place_by_platform_id(platform_id: &str) -> Result<AccountPlace, String> {
+pub async fn fetch_place_by_platform_id(
+    bot: &DiscordBot,
+    platform_id: &str,
+) -> Result<AccountPlace, String> {
     let id = platform_id
         .parse::<u64>()
         .map_err(|_| format!("invalid discord place id: {platform_id}"))?;
-    let http = DiscordBot::bot();
+    let http = bot.bot();
     let channel_id = ChannelId::new(id);
     if let Ok(channel) = http.get_channel(channel_id).await {
         return Ok(place_from_channel(&channel));

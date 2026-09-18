@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use app_database::Database;
 use arc_swap::ArcSwapOption;
 use axum::{
     Router,
@@ -24,6 +25,7 @@ pub struct AppState {
     pub session_key: Arc<auth::SessionKey>,
     pub central: Arc<ArcSwapOption<CentralClient>>,
     pub live: Option<stream::LiveSnapshots>,
+    pub db: Arc<Database>,
 }
 
 impl AppState {
@@ -37,14 +39,16 @@ pub async fn run(
     config: AdminHttpConfig,
     central: Arc<ArcSwapOption<CentralClient>>,
     session_secret: Arc<str>,
+    db: Arc<Database>,
 ) -> ComponentResult {
     let session_key = Arc::new(auth::SessionKey::new(session_secret.as_bytes()));
     info!("starting live snapshots");
-    let live = stream::LiveSnapshots::spawn();
+    let live = stream::LiveSnapshots::spawn(db.clone());
     let state = AppState {
         session_key: session_key.clone(),
         central,
         live: Some(live),
+        db,
     };
 
     let app = create_router(state);

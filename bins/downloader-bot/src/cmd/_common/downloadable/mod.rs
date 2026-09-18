@@ -1,5 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 
+use app_peer_comms::PeeringEndpoint;
+
 pub mod impls;
 
 pub trait Downloadable {
@@ -12,6 +14,7 @@ pub trait Downloadable {
 
     async fn download_into(
         &self,
+        peering: &PeeringEndpoint,
         to: tokio::fs::File,
     ) -> Result<(tokio::fs::File, Option<PathBuf>), Self::Error>;
 }

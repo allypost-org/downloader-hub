@@ -1,6 +1,6 @@
-use app_config::GlobalConfig;
+use std::sync::Arc;
+
 use app_helpers::futures::run_future;
-use app_peer_comms::PeeringEndpoint;
 use tracing::{Instrument, debug, instrument, warn};
 
 use super::CmdResult;
@@ -20,11 +20,18 @@ pub fn run(config: CentralConfig) -> CmdResult {
 
 #[instrument(name = "central", skip_all)]
 async fn async_run(config: CentralConfig) -> CmdResult {
-    app_database::Database::init(config.database.clone())
-        .await
-        .expect("Failed to initialize database");
+    let state = components::state::CentralState::shared();
 
-    let mut handles = components::spawn(config).in_current_span().await?;
+    let db = Arc::new(
+        app_database::Database::new(config.database.clone())
+            .await
+            .expect("Failed to initialize database"),
+    );
+    let _ = state.db.set(db);
+
+    let mut handles = components::spawn(config, state.clone())
+        .in_current_span()
+        .await?;
 
     while let Some(res) = handles.join_next().await {
         let (name, res) = match res {
@@ -43,7 +50,7 @@ async fn async_run(config: CentralConfig) -> CmdResult {
         debug!(?name, "Component task exited normally");
     }
 
-    if let Some(pe) = PeeringEndpoint::get_global()
+    if let Some(pe) = state.peering.get()
         && let Err(e) = pe.router.shutdown().await
     {
         warn!(?e, "Failed to shutdown peering router");

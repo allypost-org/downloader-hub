@@ -1,0 +1,19 @@
+amends "package://github.com/jdx/hk/releases/download/v1.58.1/hk@1.58.1#/Config.pkl"
+
+hooks {
+    ["pre-commit"] {
+        // cargo/frontend/convex steps validate a snapshot of the index
+        // (scripts/check-staged-tree), never the worktree, so hk itself
+        // must not stash or otherwise touch working files
+        stash = "none"
+        steps {
+            // every step reads the staged index; concurrent git diff
+            // invocations contend on .git/index.lock, so run them serially
+            ["diff-hygiene"] { exclusive = true; check = "git diff --cached --check" }
+            ["ascii-glyphs"] { exclusive = true; check = "scripts/check-ascii" }
+            ["cargo"] { exclusive = true; check = "scripts/check-staged-tree cargo" }
+            ["frontend"] { exclusive = true; check = "scripts/check-staged-tree frontend" }
+            ["convex"] { exclusive = true; check = "scripts/check-staged-tree convex" }
+        }
+    }
+}

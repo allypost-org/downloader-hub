@@ -36,8 +36,6 @@ const internalMutation = customMutation(
   customCtx(triggers.wrapDB),
 );
 
-// const MAX_PROCESSING_TIME_MS = 15 * 60 * 1_000;
-// const MAX_PROCESSING_TIME_MS = 15 * 1_000;
 const MAX_PROCESSING_IDLE_TIME_MS = 10 * 60 * 1_000;
 const MAX_WAITING_FOR_REQUESTER_IDLE_TIME_MS = 15 * 60 * 1_000;
 // delivery lease: the bot owns a claimed request for this long before the
@@ -1585,7 +1583,7 @@ export const getByOrderedIn = query({
 });
 
 /// Latest `lastModified` across all requests, or null if there are none. Used
-/// by the admin live-stream as a "data changed" ping — the value advances
+/// by the admin live-stream as a "data changed" ping - the value advances
 /// monotonically whenever any request is mutated.
 export const getLatestChange = query({
   args: {},
