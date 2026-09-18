@@ -153,16 +153,6 @@ export const outbox = {
   sentBy: v.id(authedId),
 };
 
-export const connectionsId = "downloader_hub_connections" as const;
-export const connections = {
-  central: v.string(),
-  authed: v.id(authedId),
-  role: v.union(v.literal("worker"), v.literal("bot"), v.literal("admin")),
-  capabilities: v.optional(v.string()),
-  version: v.optional(v.string()),
-  lastSeen: v.int64(),
-};
-
 export const logSettingsScope = v.union(
   v.literal("global"),
   v.literal("central"),
@@ -210,10 +200,6 @@ export default defineSchema(
       ]),
 
     [outboxId]: defineTable(outbox).index("by_sentBy", ["sentBy"]),
-
-    [connectionsId]: defineTable(connections)
-      .index("by_central_authed", ["central", "authed"])
-      .index("by_last_seen", ["lastSeen"]),
 
     [logSettingsId]: defineTable(logSettings).index("by_scope", ["scope"]),
 

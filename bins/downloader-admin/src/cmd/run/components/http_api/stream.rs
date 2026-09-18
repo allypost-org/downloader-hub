@@ -6,14 +6,14 @@ use axum::{
         State, WebSocketUpgrade,
         ws::{Message, WebSocket},
     },
-    response::{IntoResponse, Response},
+    response::Response,
 };
 use futures::{SinkExt, StreamExt};
 use serde::Serialize;
 use tokio::sync::watch;
 use tracing::{debug, warn};
 
-use super::{AppState, auth::AdminSession, envelope::V1Response};
+use super::{AppState, auth::AdminSession};
 
 const RECENT_FAILED_LIMIT: i64 = 5;
 
@@ -261,15 +261,7 @@ pub async fn ws_stream(
     State(state): State<AppState>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    let Some(live) = state.live else {
-        return V1Response::<()>::err(
-            axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            "live snapshots not available",
-        )
-        .into_response();
-    };
-
-    ws.on_upgrade(move |socket| handle_stream_socket(socket, live))
+    ws.on_upgrade(move |socket| handle_stream_socket(socket, state.live))
 }
 
 async fn handle_stream_socket(socket: WebSocket, live: LiveSnapshots) {

@@ -24,7 +24,7 @@ pub mod stream;
 pub struct AppState {
     pub session_key: Arc<auth::SessionKey>,
     pub central: Arc<ArcSwapOption<CentralClient>>,
-    pub live: Option<stream::LiveSnapshots>,
+    pub live: stream::LiveSnapshots,
     pub db: Arc<Database>,
 }
 
@@ -47,7 +47,7 @@ pub async fn run(
     let state = AppState {
         session_key: session_key.clone(),
         central,
-        live: Some(live),
+        live,
         db,
     };
 
@@ -103,7 +103,6 @@ fn api_router() -> Router<AppState> {
             "/requests/{id}/clear-refusals",
             post(routes::clear_refusals),
         )
-        .route("/connections", get(routes::connections))
         .route("/metrics", get(routes::metrics))
         .route("/log-settings", get(routes::list_log_settings))
         .route(

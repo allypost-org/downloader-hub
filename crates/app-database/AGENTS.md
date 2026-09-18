@@ -17,12 +17,11 @@ Convex client for Rust + the Convex TypeScript backend itself. All five binaries
 
 ## Schema (`convex/schema.ts`)
 
-Four tables:
+Three tables:
 
 - `downloader_hub_authed` - auth tokens (`for: "worker" | "bot" | "admin"`).
 - `downloader_hub_requests` - download jobs with a discriminated `status` union: `pending` / `inProgress` / `delivering` / `done` / `failed`. `delivering` is the bot delivery lease (fenced by `deliveryAttemptId`); `done.by` is the worker, optional `done.deliveredBy` is the delivering bot.
 - `downloader_hub_outbox` - messages broadcast to peer audiences.
-- `downloader_hub_connections` - peer inventory rows (one per authed peer per central).
 
 When adding a field/table, update **both** `convex/schema.ts` (plus the relevant function file) and the Rust entity mirror under `src/entity/`.
 

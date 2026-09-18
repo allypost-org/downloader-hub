@@ -46,34 +46,6 @@ pub async fn get_join_ticket(
     }))
 }
 
-pub async fn get_connections(
-    State(db): State<Arc<Database>>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
-    let Some(info) = require_authed(&db, &headers).await else {
-        return super::V1Response::err(
-            StatusCode::UNAUTHORIZED,
-            "Missing or invalid `Authorization: Bearer <api_key>` header",
-        );
-    };
-    if let AuthedInfoResponse::NotAuthorized { error } = info {
-        return super::V1Response::err(StatusCode::UNAUTHORIZED, error);
-    }
-
-    match db.connections_list().await {
-        Ok(rows) => super::V1Response::ok(serde_json::json!({
-            "connections": rows,
-        })),
-        Err(e) => {
-            error!(?e, "Failed to list connections");
-            super::V1Response::err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Something went wrong while listing connections",
-            )
-        }
-    }
-}
-
 pub async fn get_metrics() -> impl IntoResponse {
     let body = metrics::render();
     (

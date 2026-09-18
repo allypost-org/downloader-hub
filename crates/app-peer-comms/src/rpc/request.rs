@@ -209,6 +209,7 @@ pub struct AdminSessionInfo {
     pub role: Role,
     pub connected_at: u64,
     pub expires_at: Option<u64>,
+    pub version: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

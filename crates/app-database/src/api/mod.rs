@@ -1,6 +1,5 @@
 pub mod accounts;
 pub mod authed;
-pub mod connections;
 pub mod log_settings;
 pub mod request;
 pub mod requests;

@@ -5,7 +5,6 @@ use app_peer_comms::{
     irpc,
     rpc::{CentralProtocol, request},
 };
-use serde::Deserialize;
 
 pub struct CentralClient {
     rpc: Arc<irpc::Client<CentralProtocol>>,
@@ -37,36 +36,6 @@ impl CentralClient {
 
     pub async fn get_capabilities(&self) -> Result<request::CapabilitiesSummary, irpc::Error> {
         self.rpc.rpc(request::GetCapabilities).await
-    }
-
-    async fn central_get<T>(&self, path: &str) -> Result<T, CentralProxyError>
-    where
-        T: serde::de::DeserializeOwned,
-    {
-        let url = self.api.url.join(path)?;
-        let resp = app_requests::Client::builder()
-            .build()?
-            .get(url)
-            .header("Authorization", format!("Bearer {}", self.api.key))
-            .send()
-            .await?
-            .error_for_status()?
-            .json::<T>()
-            .await?;
-        Ok(resp)
-    }
-
-    pub async fn proxy_connections(&self) -> Result<Vec<serde_json::Value>, CentralProxyError> {
-        #[derive(Debug, Deserialize)]
-        struct Resp {
-            data: RespData,
-        }
-        #[derive(Debug, Deserialize)]
-        struct RespData {
-            connections: Vec<serde_json::Value>,
-        }
-        let resp: Resp = self.central_get("/api/v1/connections").await?;
-        Ok(resp.data.connections)
     }
 
     pub async fn proxy_metrics_raw(&self) -> Result<String, CentralProxyError> {

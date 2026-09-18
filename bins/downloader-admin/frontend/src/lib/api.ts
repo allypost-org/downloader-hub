@@ -72,18 +72,10 @@ export interface AuthedCreateInfo {
   token: string;
 }
 
-export interface ConnectionInfo {
-  central: string;
-  authed: string;
-  role: string;
-  capabilities: string | null;
-  version: string | null;
-  lastSeen: string;
-}
-
 export interface AdminSessionInfo {
   authedId: string;
   role: "worker" | "bot" | "admin";
+  version: string | null;
   connectedAt: number;
   expiresAt: number | null;
 }
@@ -286,8 +278,6 @@ export const api = {
   clearRefusals: (id: string) =>
     request<unknown>("POST", `/requests/${encodeURIComponent(id)}/clear-refusals`),
 
-  connections: () =>
-    request<{ connections: ConnectionInfo[] }>("GET", "/connections"),
   metrics: () => fetch("/api/admin/metrics").then((r) => r.text()),
   listLogSettings: () =>
     request<LogSettings[]>("GET", "/log-settings"),

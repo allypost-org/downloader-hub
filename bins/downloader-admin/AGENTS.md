@@ -9,10 +9,10 @@ Operator UI for the hub - an axum server with an **embedded React 19 SPA** (`rus
 - `src/cmd/_config.rs` - `CmdConfig` enum (single `Run(AdminConfig)` variant) + manual `impl Validate`.
 - `src/cmd/run/config.rs` - `AdminConfig`: `database` + `http` (`AdminHttpConfig`: bind host/port + `--admin-session-secret`) + `central: Option<PeerCommsAdminConfig>` (central URL + admin API key; `None` => DB-only mode).
 - `src/cmd/run/components/mod.rs` - `init(central_cfg)` fetches central's join ticket (admin target), builds the `PeeringEndpoint`, dials central, sends irpc `Auth` with `Capabilities::Admin`. Returns `Option<Arc<CentralClient>>` (None on failure -> HTTP API degrades to DB-only).
-- `src/cmd/run/components/central/mod.rs` - `CentralClient`: wraps the irpc `Client<CentralProtocol>`; exposes `list_sessions`/`list_parked_workers` (admin RPCs) and HTTP proxies to central's `/connections` + `/metrics` via `app_requests::Client`.
+- `src/cmd/run/components/central/mod.rs` - `CentralClient`: wraps the irpc `Client<CentralProtocol>`; exposes `list_sessions`/`list_parked_workers` (admin RPCs) and an HTTP proxy to central's `/metrics` via `app_requests::Client`.
 - `src/cmd/run/components/http_api/mod.rs` - the axum router: `/api/admin/*` JSON API + embedded SPA (`/`, `/assets/*`, deep-link fallback to `index.html`). `AppState` holds the `SessionKey` + optional `CentralClient`. `keep_running`-supervised.
 - `src/cmd/run/components/http_api/auth.rs` - signed-cookie sessions (`axum_extra::extract::SignedCookieJar`, HMAC via `cookie::Key::derive_from(session_secret)`). `AdminSession` extractor rejects requests without a valid cookie. Cookie claims = `{admin_id, exp}`, 12h sliding.
-- `src/cmd/run/components/http_api/routes.rs` - handlers: `auth/login`/`logout`/`me`, `requests` (list by status, get, retry, cancel, remove, clear-refusals), `connections`, `metrics`, `authed` (list/create/revoke/rotate/remove), `central/sessions` + `central/parked-workers`.
+- `src/cmd/run/components/http_api/routes.rs` - handlers: `auth/login`/`logout`/`me`, `requests` (list by status, get, retry, cancel, remove, clear-refusals), `metrics`, `authed` (list/create/revoke/rotate/remove), `central/sessions` + `central/parked-workers`.
 - `src/cmd/run/components/http_api/envelope.rs` - `V1Response<T>` JSON envelope (`{status, data}` / `{status, error}`), copied from central.
 - `src/cmd/run/components/http_api/spa.rs` - `rust-embed` of `frontend/dist`; serves assets by path, falls back to `index.html`.
 - `frontend/` - the Vite SPA (see below).

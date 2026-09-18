@@ -1,11 +1,9 @@
 use std::{
     collections::HashMap,
     sync::{Arc, LazyLock, Mutex},
-    time::{Duration, Instant},
 };
 
 use app_database::{
-    Database,
     api::authed::AuthedInfoResponse,
     entity::{accounts::Platform, authed::AuthedForRole},
 };
@@ -39,7 +37,7 @@ use app_peer_comms::{
     },
     rpc::{
         AuthResult, CentralProtocol, CentralRequest,
-        request::{Capabilities, CapabilitiesSummary, LogSettingsResult, SecretsResult},
+        request::{Capabilities, LogSettingsResult, SecretsResult},
     },
 };
 use futures::StreamExt;
@@ -49,7 +47,6 @@ use tracing::{debug, error, info, instrument, warn};
 use crate::cmd::central::components::{metrics, state::SharedCentralState};
 
 const INFLIGHT_LIMIT: usize = 64;
-const CAPABILITIES_TTL: Duration = Duration::from_secs(15);
 /// Per-authed-id cap on concurrent request watches.
 const MAX_WATCHES_PER_AUTHED: usize = 64;
 /// Process-wide cap on concurrent request watches.
@@ -92,8 +89,6 @@ fn reclaim_per_authed_watch_state(authed_id: &Arc<str>, state: &Arc<PerAuthedWat
     }
 }
 
-static CAPABILITIES_CACHE: Mutex<Option<(Instant, CapabilitiesSummary)>> = Mutex::new(None);
-
 mod distributor;
 mod restrictions;
 mod revocation;
@@ -134,8 +129,13 @@ impl ProtocolHandler for CentralRpcServer {
         let in_flight = Arc::new(Semaphore::new(INFLIGHT_LIMIT));
 
         loop {
-            let Some(msg) = irpc_iroh::read_request::<CentralProtocol>(&conn).await? else {
-                break;
+            let msg = match irpc_iroh::read_request::<CentralProtocol>(&conn).await {
+                Ok(Some(msg)) => msg,
+                Ok(None) => break,
+                Err(e) => {
+                    debug!(?e, "irpc connection lost");
+                    break;
+                }
             };
 
             match msg {
@@ -184,17 +184,9 @@ impl ProtocolHandler for CentralRpcServer {
             }
         }
 
-        if let Some((id, authed, _)) = session {
+        if let Some((id, _, _)) = session {
             self.state.distributor().disconnect(id).await;
             self.state.sessions.unregister(id);
-            if let Err(e) = self
-                .state
-                .db()
-                .connections_remove(self.state.central_id(), authed)
-                .await
-            {
-                warn!(?e, "Failed to remove connection inventory row");
-            }
         }
         let _ = conn.closed().await;
         Ok(())
@@ -210,29 +202,16 @@ impl CentralRpcServer {
         conn: &Connection,
     ) -> AuthOutcome {
         let db = self.state.db();
-        let central_id = self.state.central_id();
         match db.authed_get_info_by_token(api_key).await {
             Ok(AuthedInfoResponse::Authorized(info)) => {
                 let caps_json = serde_json::to_string(&capabilities).ok();
-                let role: &'static str = (&info.for_role).into();
-                if let Err(e) = db
-                    .connections_upsert(
-                        central_id,
-                        info.id.clone(),
-                        role,
-                        caps_json,
-                        Some(version.clone()),
-                    )
-                    .await
-                {
-                    warn!(?e, "Failed to upsert connection inventory row");
-                }
-
                 let role = info.for_role;
                 let id = self.state.sessions.register(
                     info.id.clone(),
                     conn.clone(),
                     (&role).into(),
+                    caps_json,
+                    Some(version),
                     info.expires_at,
                 );
                 metrics::auth_ok();
@@ -289,12 +268,6 @@ impl CentralRpcServer {
             CentralRequest::Auth(_) => unreachable!("Auth is handled in the accept loop"),
             CentralRequest::Heartbeat(r) => {
                 let WithChannels { tx, .. } = r;
-                if let Err(e) = db
-                    .connections_heartbeat(self.state.central_id(), authed_id)
-                    .await
-                {
-                    warn!(?e, "Failed to touch connection inventory row");
-                }
                 let _ = tx.send(()).await;
             }
             CentralRequest::GetWorkItem(r) => {
@@ -907,7 +880,7 @@ impl CentralRpcServer {
             }
             CentralRequest::GetCapabilities(r) => {
                 let WithChannels { tx, .. } = r;
-                let summary = aggregate_capabilities_cached(&db).await;
+                let summary = self.state.sessions.worker_capabilities();
                 let _ = tx.send(summary).await;
             }
             CentralRequest::AdminListSessions(r) => {
@@ -981,84 +954,6 @@ impl CentralRpcServer {
                 let _ = tx.send(result).await;
             }
         }
-    }
-}
-
-async fn aggregate_capabilities_cached(db: &Database) -> CapabilitiesSummary {
-    let value = CAPABILITIES_CACHE
-        .lock()
-        .expect("capabilities cache lock poisoned")
-        .clone();
-
-    if let Some((fetched_at, summary)) = value
-        && fetched_at.elapsed() < CAPABILITIES_TTL
-    {
-        return summary;
-    }
-
-    let summary = aggregate_capabilities(db).await;
-    *CAPABILITIES_CACHE
-        .lock()
-        .expect("capabilities cache lock poisoned") = Some((Instant::now(), summary.clone()));
-    summary
-}
-
-async fn aggregate_capabilities(db: &Database) -> CapabilitiesSummary {
-    use std::collections::HashSet;
-
-    use app_peer_comms::rpc::request::HandlerEntry;
-
-    let rows = match db.connections_list().await {
-        Ok(rows) => rows,
-        Err(e) => {
-            warn!(?e, "connections_list failed for capabilities aggregate");
-            return CapabilitiesSummary::default();
-        }
-    };
-
-    let mut extractors: Vec<HandlerEntry> = Vec::new();
-    let mut downloaders: Vec<HandlerEntry> = Vec::new();
-    let mut fixers: Vec<HandlerEntry> = Vec::new();
-    let mut seen_x = HashSet::new();
-    let mut seen_d = HashSet::new();
-    let mut seen_f = HashSet::new();
-
-    for row in rows {
-        if row.role != "worker" {
-            continue;
-        }
-        let Some(json) = row.capabilities else {
-            continue;
-        };
-        let Ok(Capabilities::Worker {
-            extractors: ex,
-            downloaders: dl,
-            fixers: fx,
-        }) = serde_json::from_str::<Capabilities>(&json)
-        else {
-            continue;
-        };
-        for e in ex {
-            if seen_x.insert(e.name.clone()) {
-                extractors.push(e);
-            }
-        }
-        for d in dl {
-            if seen_d.insert(d.name.clone()) {
-                downloaders.push(d);
-            }
-        }
-        for f in fx {
-            if seen_f.insert(f.name.clone()) {
-                fixers.push(f);
-            }
-        }
-    }
-
-    CapabilitiesSummary {
-        extractors,
-        downloaders,
-        fixers,
     }
 }
 

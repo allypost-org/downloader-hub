@@ -6,7 +6,10 @@ use std::{
 
 use app_peer_comms::{
     IrohConnection as Connection,
-    rpc::{request::AdminSessionInfo, session::Role},
+    rpc::{
+        request::{AdminSessionInfo, Capabilities, CapabilitiesSummary, HandlerEntry},
+        session::Role,
+    },
 };
 
 use crate::cmd::central::components::metrics;
@@ -33,6 +36,8 @@ struct Session {
     authed_id: Arc<str>,
     conn: Connection,
     role: Role,
+    capabilities: Option<String>,
+    version: Option<String>,
     connected_at: u64,
     expires_at: Option<u64>,
 }
@@ -43,6 +48,8 @@ impl SessionRegistry {
         authed_id: Arc<str>,
         conn: Connection,
         role: Role,
+        capabilities: Option<String>,
+        version: Option<String>,
         expires_at: Option<u64>,
     ) -> u64 {
         let connected_at = SystemTime::now()
@@ -58,6 +65,8 @@ impl SessionRegistry {
                     authed_id: authed_id.clone(),
                     conn,
                     role,
+                    capabilities,
+                    version,
                     connected_at,
                     expires_at,
                 },
@@ -77,10 +86,63 @@ impl SessionRegistry {
             .map(|s| AdminSessionInfo {
                 authed_id: s.authed_id.clone(),
                 role: s.role.clone(),
+                version: s.version.clone(),
                 connected_at: s.connected_at,
                 expires_at: s.expires_at,
             })
             .collect()
+    }
+
+    #[must_use]
+    pub fn worker_capabilities(&self) -> CapabilitiesSummary {
+        let worker_caps: Vec<String> = {
+            let inner = self.inner.lock().expect("session registry poisoned");
+            inner
+                .by_id
+                .values()
+                .filter(|s| matches!(s.role, Role::Worker))
+                .filter_map(|s| s.capabilities.clone())
+                .collect()
+        };
+
+        let mut extractors: Vec<HandlerEntry> = Vec::new();
+        let mut downloaders: Vec<HandlerEntry> = Vec::new();
+        let mut fixers: Vec<HandlerEntry> = Vec::new();
+        let mut seen_x = HashSet::new();
+        let mut seen_d = HashSet::new();
+        let mut seen_f = HashSet::new();
+
+        for json in worker_caps {
+            let Ok(Capabilities::Worker {
+                extractors: ex,
+                downloaders: dl,
+                fixers: fx,
+            }) = serde_json::from_str::<Capabilities>(&json)
+            else {
+                continue;
+            };
+            for e in ex {
+                if seen_x.insert(e.name.clone()) {
+                    extractors.push(e);
+                }
+            }
+            for d in dl {
+                if seen_d.insert(d.name.clone()) {
+                    downloaders.push(d);
+                }
+            }
+            for f in fx {
+                if seen_f.insert(f.name.clone()) {
+                    fixers.push(f);
+                }
+            }
+        }
+
+        CapabilitiesSummary {
+            extractors,
+            downloaders,
+            fixers,
+        }
     }
 
     pub fn unregister(&self, id: u64) {

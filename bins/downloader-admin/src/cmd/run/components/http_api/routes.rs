@@ -584,27 +584,6 @@ pub async fn remove_authed(
     }
 }
 
-pub async fn connections(
-    _session: AdminSession,
-    State(state): State<AppState>,
-) -> impl IntoResponse {
-    if let Some(central) = state.central() {
-        match central.proxy_connections().await {
-            Ok(conns) => {
-                return V1Response::ok(serde_json::json!({ "connections": conns }));
-            }
-            Err(e) => tracing::warn!(?e, "central /connections proxy failed; falling back to DB"),
-        }
-    }
-    match state.db.connections_list().await {
-        Ok(rows) => V1Response::ok(serde_json::json!({ "connections": rows })),
-        Err(e) => {
-            tracing::error!(?e, "connections_list failed");
-            V1Response::err(StatusCode::INTERNAL_SERVER_ERROR, "database error")
-        }
-    }
-}
-
 pub async fn list_account_users(
     _session: AdminSession,
     State(state): State<AppState>,

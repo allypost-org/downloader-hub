@@ -113,8 +113,7 @@ async fn init_peering(
         .await?;
 
     let pe = Arc::new(pe);
-    let _ = state.peering.set(pe.clone());
-    let _ = state.central_id.set(pe.endpoint_id().await.to_string());
+    let _ = state.peering.set(pe);
     Ok(())
 }
 

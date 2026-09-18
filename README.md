@@ -72,7 +72,7 @@ Each binary has its own `AGENTS.md` with layout, entrypoints, and startup contra
 | `downloader-cli` | local standalone tool | no | - (flat args) |
 | `downloader-admin` | operator UI (embedded React 19 SPA) | yes (client, admin role) | `run` |
 
-- **`downloader-central`** - the iroh coordination node. Serves the irpc control protocol (`app_peer_comms::rpc::CentralProtocol`), runs the `WorkDistributor` actor (parks workers on a blocking `getWorkItem` and pre-takes work on their behalf), watches Convex for session revocation, and exposes a minimal axum HTTP surface: `/api/v1/join-ticket` (bootstrap), `/api/v1/connections` (peer inventory), `/api/v1/metrics` (Prometheus), `/health`.
+- **`downloader-central`** - the iroh coordination node. Serves the irpc control protocol (`app_peer_comms::rpc::CentralProtocol`), runs the `WorkDistributor` actor (parks workers on a blocking `getWorkItem` and pre-takes work on their behalf), watches Convex for session revocation, and exposes a minimal axum HTTP surface: `/api/v1/join-ticket` (bootstrap), `/api/v1/metrics` (Prometheus), `/health`.
 - **`downloader-worker`** - connects to `central`, authenticates, and runs a sequential loop: `getWorkItem` (blocks until handed an item it hasn't refused) -> process or `refuse` -> repeat. Also runs `app-tasks` cron jobs (e.g. `yt-dlp` auto-updates) and an expired-blob-tag cleanup loop.
 - **`downloader-bot`** - multi-platform bot selected via a positional subcommand. Receives media/links from chat, creates work requests on `central`, and consumes a server-streaming `WorkRequestGetMineInProgress` irpc call to track and report progress. Telegram is built on `teloxide`, Discord on `serenity`.
 - **`downloader-cli`** - a single-file local tool that directly invokes `app_actions::download_file` / `fix_file`. Reads URLs and/or local file paths, downloads concurrently, fixes/renames/splits as requested. No peer-comms, no Convex, no `app-logger`.
@@ -101,7 +101,6 @@ There is **no SQL database**. State lives in **Convex** (a hosted TypeScript rea
 | `downloader_hub_authed` | API keys for workers/bots (stable identity, role, optional expiry) |
 | `downloader_hub_requests` | the work queue (status: `pending`/`inProgress`/`done`/`failed`, `tries`, `refusedBy`, `errors`) |
 | `downloader_hub_outbox` | messages broadcast to peer audiences |
-| `downloader_hub_connections` | live connection inventory (which worker/bot is connected to which central, with capabilities) |
 
 ## Runtime dependencies
 

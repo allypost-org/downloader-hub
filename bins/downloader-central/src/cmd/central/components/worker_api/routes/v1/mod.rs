@@ -10,7 +10,6 @@ pub mod root;
 pub fn create_v1_router(peering: Arc<PeeringEndpoint>) -> Router<Arc<Database>> {
     Router::new()
         .route("/join-ticket", get(root::get_join_ticket))
-        .route("/connections", get(root::get_connections))
         .route("/metrics", get(root::get_metrics))
         .layer(Extension(peering))
 }

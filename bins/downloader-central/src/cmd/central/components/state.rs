@@ -23,7 +23,6 @@ pub struct CentralState {
     pub restrictions: ArcSwapOption<RestrictionsManager>,
     pub log_settings: RwLock<Vec<LogSettings>>,
     pub secrets: RwLock<Vec<SecretEntry>>,
-    pub central_id: OnceLock<String>,
     pub peering: OnceLock<Arc<PeeringEndpoint>>,
 }
 
@@ -70,13 +69,6 @@ impl CentralState {
         let (handle, join) = WorkDistributor::spawn(self.db().clone());
         self.distributor.store(Some(Arc::new(handle)));
         join
-    }
-
-    pub fn central_id(&self) -> String {
-        self.central_id
-            .get()
-            .expect("central_id not initialized")
-            .clone()
     }
 
     pub async fn set_log_settings(&self, settings: Vec<LogSettings>) {
