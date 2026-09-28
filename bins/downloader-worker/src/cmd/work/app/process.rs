@@ -1,9 +1,9 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use app_actions::{Actions, downloaders::DownloaderError};
 use app_helpers::{futures::task_controller::TaskController, temp_dir::TempDir};
 use app_peer_comms::{
-    AccountPlaceRef, AccountUserRef, IrohBlobTicket, PeeringEndpoint,
+    AccountPlaceRef, AccountUserRef, IrohBlobStatus, IrohBlobTicket, IrohHash, PeeringEndpoint,
     message::v1::{
         central::work_request::{WorkRequest, WorkRequestInfo, request::WorkRequestMeta},
         common::file::FileReference,
@@ -391,58 +391,103 @@ async fn fix_stage_and_deliver(
 
     trace!(paths = ?fixed_paths, "Adding paths to blob store");
 
-    let mut tickets = vec![];
-    let batch = match pe.blobs.store().batch().await {
-        Ok(x) => x,
-        Err(e) => {
-            error!(?e, "Failed to create batch");
-            broadcaster.send_work_request_free(request_id.clone());
-            return;
-        }
-    };
     let expires = jiff::Timestamp::now()
         .checked_add(30.minutes())
         .expect("30-minute span is always representable as a Timestamp");
-    for path in &fixed_paths {
-        let hash_and_fmt = batch
-            .add_path_with_opts(app_peer_comms::IrohAddPathOptions {
-                format: app_peer_comms::IrohBlobFormat::Raw,
-                mode: app_peer_comms::IrohImportMode::Copy,
-                path: path.clone(),
-            })
-            .with_named_tag(PeeringEndpoint::expiring_tag_name(&expires))
-            .await;
-        let hash_and_fmt = match hash_and_fmt {
+
+    let mut tickets = vec![];
+    {
+        let batch = match pe.blobs.store().batch().await {
             Ok(x) => x,
             Err(e) => {
-                error!(?e, "Failed to add path");
-                broadcaster.send_work_request_add_errors(
-                    request_id.clone(),
-                    vec![format!("Failed to process file {:?}: {}", path, e)],
-                );
-                continue;
+                error!(?e, "Failed to create batch");
+                broadcaster.send_work_request_free(request_id.clone());
+                return;
             }
         };
+        for path in &fixed_paths {
+            let hash_and_fmt = batch
+                .add_path_with_opts(app_peer_comms::IrohAddPathOptions {
+                    format: app_peer_comms::IrohBlobFormat::Raw,
+                    mode: app_peer_comms::IrohImportMode::Copy,
+                    path: path.clone(),
+                })
+                .with_named_tag(PeeringEndpoint::expiring_tag_name(&expires))
+                .await;
+            let hash_and_fmt = match hash_and_fmt {
+                Ok(x) => x,
+                Err(e) => {
+                    error!(?e, "Failed to add path");
+                    broadcaster.send_work_request_add_errors(
+                        request_id.clone(),
+                        vec![format!("Failed to process file {:?}: {}", path, e)],
+                    );
+                    continue;
+                }
+            };
 
-        let ticket = IrohBlobTicket::new(
-            pe.endpoint_addr().await,
-            hash_and_fmt.hash,
-            hash_and_fmt.format,
-        );
+            let ticket = IrohBlobTicket::new(
+                pe.endpoint_addr().await,
+                hash_and_fmt.hash,
+                hash_and_fmt.format,
+            );
 
-        tickets.push(FileReference::BlobTicket(
-            (
-                ticket,
-                path.file_name()
-                    .unwrap_or_else(|| path.as_os_str())
-                    .to_string_lossy()
-                    .to_string(),
-            )
-                .into(),
-        ));
+            tickets.push(FileReference::BlobTicket(
+                (
+                    ticket,
+                    path.file_name()
+                        .unwrap_or_else(|| path.as_os_str())
+                        .to_string_lossy()
+                        .to_string(),
+                )
+                    .into(),
+            ));
+        }
     }
 
-    debug!(tickets = ?tickets, "Added paths to blob store");
+    let mut served = vec![];
+    for ticket in tickets {
+        let FileReference::BlobTicket(inner) = &ticket else {
+            served.push(ticket);
+            continue;
+        };
+        match wait_until_blob_visible(pe, inner.ticket.hash()).await {
+            Ok(()) => served.push(ticket),
+            Err(e) => {
+                error!(?e, "Imported blob failed to become visible");
+                broadcaster.send_work_request_add_errors(
+                    request_id.clone(),
+                    vec![format!("Failed to process file: {e}")],
+                );
+            }
+        }
+    }
+    if served.is_empty() {
+        let reason = "No files could be stored for delivery".to_string();
+        broadcaster.send_work_request_fail(request_id.clone(), &reason);
+        return;
+    }
 
-    broadcaster.send_work_request_move_to_waiting_for_requester(request_id, tickets);
+    debug!(tickets = ?served, "Added paths to blob store");
+
+    broadcaster.send_work_request_move_to_waiting_for_requester(request_id, served);
+}
+
+const BLOB_VISIBILITY_TIMEOUT: Duration = Duration::from_secs(15);
+const BLOB_VISIBILITY_POLL: Duration = Duration::from_millis(100);
+
+async fn wait_until_blob_visible(peering: &PeeringEndpoint, hash: IrohHash) -> anyhow::Result<()> {
+    let deadline = tokio::time::Instant::now() + BLOB_VISIBILITY_TIMEOUT;
+    loop {
+        match peering.blobs.store().blobs().status(hash).await {
+            Ok(IrohBlobStatus::Complete { .. }) => return Ok(()),
+            status => {
+                trace!(?hash, ?status, "Blob not visible yet");
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            anyhow::bail!("blob {hash} did not become visible within {BLOB_VISIBILITY_TIMEOUT:?}");
+        }
+        tokio::time::sleep(BLOB_VISIBILITY_POLL).await;
+    }
 }

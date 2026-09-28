@@ -2119,6 +2119,7 @@ dependencies = [
 name = "downloader-worker"
 version = "0.11.2"
 dependencies = [
+ "anyhow",
  "app-actions",
  "app-config",
  "app-helpers",

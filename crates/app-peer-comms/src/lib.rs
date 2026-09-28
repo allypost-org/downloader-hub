@@ -23,8 +23,11 @@ pub use iroh::{
     protocol::{AcceptError as IrohAcceptError, ProtocolHandler as IrohProtocolHandler},
 };
 pub use iroh_blobs::{
-    BlobFormat as IrohBlobFormat, HashAndFormat as IrohHashAndFormat,
-    api::blobs::{AddPathOptions as IrohAddPathOptions, ImportMode as IrohImportMode},
+    BlobFormat as IrohBlobFormat, Hash as IrohHash, HashAndFormat as IrohHashAndFormat,
+    api::{
+        blobs::{AddPathOptions as IrohAddPathOptions, ImportMode as IrohImportMode},
+        proto::BlobStatus as IrohBlobStatus,
+    },
     get::request::GetBlobItem as IrohGetBlobItem,
     ticket::BlobTicket as IrohBlobTicket,
 };
@@ -35,6 +38,10 @@ use iroh_blobs::{
         downloader::{DownloadProgress, Downloader},
     },
     get::{Stats as IrohBlobStats, request::GetBlobResult},
+    provider::events::{
+        ConnectMode, EventMask, EventSender, ObserveMode, ProviderMessage, RequestMode,
+        RequestUpdate, ThrottleMode,
+    },
     store::fs as blobs_store_fs,
 };
 use iroh_gossip::{
@@ -48,8 +55,12 @@ pub use iroh_gossip::{
 use iroh_mdns_address_lookup::MdnsAddressLookup;
 pub use irpc;
 pub use irpc_iroh;
-use tokio::{fs::File, io::AsyncWriteExt, sync::RwLock};
-use tracing::{debug, error, info, trace};
+use tokio::{
+    fs::File,
+    io::AsyncWriteExt,
+    sync::{RwLock, mpsc},
+};
+use tracing::{debug, error, info, trace, warn};
 use url::Url;
 
 pub mod helpers;
@@ -307,10 +318,12 @@ impl PeeringEndpoint {
         file: &mut File,
     ) -> anyhow::Result<IrohBlobStats> {
         debug!(target: PeeringEndpoint::trace_span_name(), ?file, "Downloading blob");
+        let mut received = 0u64;
         let stats = loop {
             match get.next().await {
                 Some(IrohGetBlobItem::Item(item)) => match item {
                     bao_tree::io::BaoContentItem::Leaf(leaf) => {
+                        received += leaf.data.len() as u64;
                         tokio::io::AsyncWriteExt::write_all(file, &leaf.data)
                             .await
                             .context("Could not write to file")?;
@@ -321,10 +334,10 @@ impl PeeringEndpoint {
                     break stats;
                 }
                 Some(IrohGetBlobItem::Error(err)) => {
-                    anyhow::bail!("Error while streaming blob: {err}");
+                    anyhow::bail!("Error while streaming blob (received {received} bytes): {err}");
                 }
                 None => {
-                    anyhow::bail!("Stream ended unexpectedly.");
+                    anyhow::bail!("Stream ended unexpectedly (received {received} bytes)");
                 }
             }
         };
@@ -578,7 +591,19 @@ impl PeeringEndpoint {
                     blobs_store_fs::FsStore::load_with_opts(path.join("blobs.db"), store_opts)
                         .await?;
                 trace!(target: PeeringEndpoint::trace_span_name(), ?store, "Filesystem blob store loaded");
-                BlobsProtocol::new(&store, None)
+                let (events, event_rx) = EventSender::channel(
+                    256,
+                    EventMask {
+                        connected: ConnectMode::None,
+                        get: RequestMode::NotifyLog,
+                        get_many: RequestMode::NotifyLog,
+                        push: RequestMode::None,
+                        observe: ObserveMode::None,
+                        throttle: ThrottleMode::None,
+                    },
+                );
+                tokio::spawn(log_blob_provider_events(event_rx));
+                BlobsProtocol::new(&store, Some(events))
             }
             None => {
                 debug!(target: PeeringEndpoint::trace_span_name(), "Using in-memory blob store");
@@ -600,4 +625,68 @@ impl PeeringEndpoint {
 
         Ok((router, gossip, blobs))
     }
+}
+
+async fn log_blob_provider_events(mut rx: mpsc::Receiver<ProviderMessage>) {
+    while let Some(msg) = rx.recv().await {
+        match msg {
+            ProviderMessage::GetRequestReceivedNotify(msg) => {
+                spawn_request_update_logger(
+                    msg.inner.connection_id,
+                    msg.inner.request_id,
+                    format!("{:?}", msg.inner.request),
+                    msg.rx,
+                );
+            }
+            ProviderMessage::GetManyRequestReceivedNotify(msg) => {
+                spawn_request_update_logger(
+                    msg.inner.connection_id,
+                    msg.inner.request_id,
+                    format!("{:?}", msg.inner.request),
+                    msg.rx,
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+fn spawn_request_update_logger(
+    connection_id: u64,
+    request_id: u64,
+    request: String,
+    mut rx: irpc::channel::mpsc::Receiver<RequestUpdate>,
+) {
+    tokio::spawn(async move {
+        trace!(
+            target: PeeringEndpoint::trace_span_name(),
+            connection_id, request_id, request, "blob request received"
+        );
+        while let Ok(Some(update)) = rx.recv().await {
+            match update {
+                RequestUpdate::Started(started) => {
+                    debug!(
+                        target: PeeringEndpoint::trace_span_name(),
+                        connection_id, request_id, hash = %started.hash, size = started.size,
+                        "blob transfer started"
+                    );
+                }
+                RequestUpdate::Aborted(aborted) => {
+                    warn!(
+                        target: PeeringEndpoint::trace_span_name(),
+                        connection_id, request_id, stats = ?aborted.stats,
+                        "blob transfer aborted"
+                    );
+                }
+                RequestUpdate::Completed(completed) => {
+                    debug!(
+                        target: PeeringEndpoint::trace_span_name(),
+                        connection_id, request_id, stats = ?completed.stats,
+                        "blob transfer completed"
+                    );
+                }
+                RequestUpdate::Progress(_) => {}
+            }
+        }
+    });
 }

@@ -57,6 +57,16 @@ const FINISH_RETRY_DELAYS: &[Duration] = &[
 ];
 
 const DOWNLOAD_CONCURRENCY: usize = 4;
+
+/// Per-file download retries. The worker's blob store can transiently fail
+/// exports ("entity not found" resets) shortly after an import; the blob is
+/// there and later attempts succeed.
+const FILE_DOWNLOAD_BACKOFF: [Duration; 4] = [
+    Duration::from_secs(1),
+    Duration::from_secs(2),
+    Duration::from_secs(5),
+    Duration::from_secs(10),
+];
 const STATUS_UPDATE_DEBOUNCE: Duration = Duration::from_millis(250);
 
 // ---------------------------------------------------------------------------
@@ -702,13 +712,39 @@ pub async fn download_and_deliver<P>(
         let peering = peering.clone();
         async move {
             let _permit = concurrency_sem.acquire().await?;
-            let temp_file =
-                tokio::task::spawn_blocking(|| TempFile::new_with_prefix("downloader-bot-dl-"))
-                    .await??;
-            let tokio_file = tokio::fs::File::from(temp_file.try_clone_file()?);
-            let (_, suggested_name) = x.download_into(&peering, tokio_file).await?;
-            debug!(file_index = i, "downloaded file for delivery");
-            Ok::<(TempFile, Option<PathBuf>), anyhow::Error>((temp_file, suggested_name))
+            let mut attempt = 0;
+            loop {
+                attempt += 1;
+                let temp_file =
+                    tokio::task::spawn_blocking(|| TempFile::new_with_prefix("downloader-bot-dl-"))
+                        .await??;
+                let tokio_file = tokio::fs::File::from(temp_file.try_clone_file()?);
+                match x.download_into(&peering, tokio_file).await {
+                    Ok((_, suggested_name)) => {
+                        debug!(
+                            file_index = i,
+                            attempts = attempt,
+                            "downloaded file for delivery"
+                        );
+                        return Ok::<(TempFile, Option<PathBuf>), anyhow::Error>((
+                            temp_file,
+                            suggested_name,
+                        ));
+                    }
+                    Err(e) if attempt <= FILE_DOWNLOAD_BACKOFF.len() => {
+                        let delay = FILE_DOWNLOAD_BACKOFF[attempt - 1];
+                        warn!(
+                            file_index = i,
+                            attempt,
+                            ?delay,
+                            error = ?e,
+                            "file download failed; retrying"
+                        );
+                        tokio::time::sleep(delay).await;
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
         }
     });
 
