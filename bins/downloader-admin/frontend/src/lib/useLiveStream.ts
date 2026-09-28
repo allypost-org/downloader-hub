@@ -2,62 +2,101 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/stores/auth-store";
 
-interface CountsMessage {
+type NamesMap = Record<string, string>;
+
+interface CountsEvent {
   type: "counts";
-  data: {
-    pending: string;
-    inProgress: string;
-    done: string;
-    failed: string;
-  };
+  pending: string;
+  inProgress: string;
+  delivering: string;
+  done: string;
+  failed: string;
 }
 
-interface RecentFailedMessage {
-  type: "recentFailed";
-  data: unknown[];
-}
-
-interface AuthedNamesMessage {
+interface AuthedNamesEvent {
   type: "authedNames";
-  data: Record<string, string>;
+  names: NamesMap;
 }
 
-interface AccountNamesMessage {
+interface AccountNamesEvent {
   type: "accountNames";
-  data: {
-    users: Record<string, string>;
-    places: Record<string, string>;
-  };
+  users: NamesMap;
+  places: NamesMap;
 }
 
-interface RequestsChangedMessage {
+interface RequestsChangedEvent {
   type: "requestsChanged";
-  // latest `lastModified` (u64 ms epoch) or null when no requests exist
-  data: string | number | null;
 }
 
-type StreamMessage =
-  | CountsMessage
-  | RecentFailedMessage
-  | AuthedNamesMessage
-  | AccountNamesMessage
-  | RequestsChangedMessage;
+interface ResyncEvent {
+  type: "resync";
+}
 
-function parseMessage(raw: string): StreamMessage | null {
+type StreamEvent =
+  | CountsEvent
+  | AuthedNamesEvent
+  | AccountNamesEvent
+  | RequestsChangedEvent
+  | ResyncEvent;
+
+function parseEvent(raw: string): StreamEvent | null {
+  let data: unknown;
   try {
-    const msg = JSON.parse(raw) as StreamMessage;
-    if (
-      msg.type === "counts" ||
-      msg.type === "recentFailed" ||
-      msg.type === "authedNames" ||
-      msg.type === "accountNames" ||
-      msg.type === "requestsChanged"
-    ) {
-      return msg;
-    }
-    return null;
+    data = JSON.parse(raw);
   } catch {
     return null;
+  }
+  if (typeof data !== "object" || data === null || !("type" in data)) {
+    return null;
+  }
+  switch ((data as StreamEvent).type) {
+    case "counts":
+    case "authedNames":
+    case "accountNames":
+    case "requestsChanged":
+    case "resync":
+      return data as StreamEvent;
+    default:
+      return null;
+  }
+}
+
+function applyEvent(
+  qc: ReturnType<typeof useQueryClient>,
+  event: StreamEvent,
+): void {
+  switch (event.type) {
+    case "counts":
+      qc.setQueryData(["request-counts"], {
+        pending: event.pending,
+        inProgress: event.inProgress,
+        delivering: event.delivering,
+        done: event.done,
+        failed: event.failed,
+      });
+      break;
+    case "authedNames":
+      qc.setQueryData(["authed-names"], event.names);
+      break;
+    case "accountNames":
+      qc.setQueryData(["account-names"], {
+        users: event.users,
+        places: event.places,
+      });
+      break;
+    case "requestsChanged":
+      qc.invalidateQueries({ queryKey: ["requests"] });
+      qc.invalidateQueries({ queryKey: ["request"] });
+      break;
+    case "resync":
+      qc.invalidateQueries({ queryKey: ["request-counts"] });
+      qc.invalidateQueries({ queryKey: ["authed-names"] });
+      qc.invalidateQueries({ queryKey: ["account-names"] });
+      qc.invalidateQueries({ queryKey: ["requests"] });
+      qc.invalidateQueries({ queryKey: ["request"] });
+      break;
+    default:
+      event satisfies never;
   }
 }
 
@@ -113,25 +152,14 @@ export function useLiveStream() {
       ws.onopen = () => {
         attempt = 0;
         authChecked = false;
+        // Catch up on anything missed while disconnected; the HTTP queries
+        // are the source of truth, the stream only accelerates updates.
+        applyEvent(qc, { type: "resync" });
       };
 
       ws.onmessage = (event) => {
-        const msg = parseMessage(event.data);
-        if (!msg) return;
-        if (msg.type === "counts") {
-          qc.setQueryData(["request-counts"], msg.data);
-        } else if (msg.type === "recentFailed") {
-          qc.setQueryData(["requests", "failed", "dashboard"], msg.data);
-        } else if (msg.type === "authedNames") {
-          qc.setQueryData(["authed-names"], msg.data);
-        } else if (msg.type === "accountNames") {
-          qc.setQueryData(["account-names"], msg.data);
-        } else if (msg.type === "requestsChanged") {
-          // Just a ping - invalidate paginated request queries so they refetch
-          // via HTTP. The actual row data is not carried over the WS.
-          qc.invalidateQueries({ queryKey: ["requests"] });
-          qc.invalidateQueries({ queryKey: ["request"] });
-        }
+        const parsed = parseEvent(event.data);
+        if (parsed) applyEvent(qc, parsed);
       };
 
       ws.onclose = () => {

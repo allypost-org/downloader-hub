@@ -24,7 +24,7 @@ pub mod stream;
 pub struct AppState {
     pub session_key: Arc<auth::SessionKey>,
     pub central: Arc<ArcSwapOption<CentralClient>>,
-    pub live: stream::LiveSnapshots,
+    pub bus: stream::LiveBus,
     pub db: Arc<Database>,
 }
 
@@ -42,12 +42,12 @@ pub async fn run(
     db: Arc<Database>,
 ) -> ComponentResult {
     let session_key = Arc::new(auth::SessionKey::new(session_secret.as_bytes()));
-    info!("starting live snapshots");
-    let live = stream::LiveSnapshots::spawn(db.clone());
+    info!("starting live sources");
+    let bus = stream::LiveBus::spawn_sources(&db);
     let state = AppState {
         session_key: session_key.clone(),
         central,
-        live,
+        bus,
         db,
     };
 

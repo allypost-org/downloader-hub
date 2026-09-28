@@ -120,7 +120,24 @@ impl OutboundLimiter {
             };
             trace!(
                 ?chat_id,
-                ?wait_until,
+                for = %format_args!("{:#}", {
+                    app_database::helpers::serde::jiff::jiff::Span::try_from(
+                        wait_until.saturating_duration_since(Instant::now()),
+                    )
+                    .expect("rate-limit wait should fit in a jiff Span")
+                    .round(
+                        app_database::helpers::serde::jiff::jiff::SpanRound::new()
+                            .smallest(app_database::helpers::serde::jiff::jiff::Unit::Millisecond)
+                            .increment(50)
+                            .days_are_24_hours()
+                    )
+                    .expect("rate-limit should be displayable")
+                }),
+                until = %{
+                    app_database::helpers::serde::jiff::jiff::Zoned::now()
+                        .checked_add(wait_until.saturating_duration_since(Instant::now()))
+                        .expect("rate-limit deadline should be representable")
+                },
                 "Waiting for Telegram outbound permit"
             );
             sleep_until(wait_until).await;
