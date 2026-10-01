@@ -92,10 +92,6 @@ async fn get_media_urls_authed(
 ) -> Result<Option<Vec<Url>>, String> {
     trace!("Fetching instagram media URLs from post (authed)");
 
-    let Some(shortcode) = shortcode_from_url(url) else {
-        return Err("Failed to extract shortcode from URL".to_string());
-    };
-
     let client = Client::sneaky().map_err(|e| format!("Failed to create client: {e:?}"))?;
 
     let resp = client
@@ -115,19 +111,40 @@ async fn get_media_urls_authed(
         .await
         .map_err(|e| format!("Failed to get response text: {e:?}"))?;
 
-    let info =
-        tokio::task::spawn_blocking(move || extract_info_from_html_authed(&resp_html, &shortcode))
-            .await
-            .map_err(|e| format!("Instagram authed extraction crashed: {e:?}"))?;
+    let info = tokio::task::spawn_blocking(move || extract_info_from_html_authed(&resp_html))
+        .await
+        .map_err(|e| format!("Instagram authed extraction crashed: {e:?}"))?;
 
     Ok(info)
 }
 
-fn shortcode_from_url(url: &str) -> Option<String> {
-    URL_MATCH
-        .captures(url)
-        .and_then(|captures| captures.name("post_id"))
-        .map(|m| m.as_str().to_string())
+fn shortcode_from_html(html: &Html) -> Result<String, String> {
+    static CANONICAL: LazyLock<Selector> =
+        LazyLock::new(|| Selector::parse("link[rel=\"canonical\"]").expect("invalid selector"));
+
+    let link = html
+        .select(&CANONICAL)
+        .next()
+        .ok_or_else(|| "Could not find canonical URL in the page".to_string())?
+        .attr("href")
+        .ok_or_else(|| {
+            "Canonical URL element doesn't have required attribute (`html`)".to_string()
+        })?;
+
+    let shortcode = URL_MATCH
+        .captures(link)
+        .ok_or_else(|| {
+            format!(
+                "Could not match canonical URL `{:?}` to a known Instagram URL",
+                link,
+            )
+        })?
+        .name("post_id")
+        .ok_or_else(|| "`post_id` variable missing from regex!!!".to_string())?
+        .as_str()
+        .to_string();
+
+    Ok(shortcode)
 }
 
 #[tracing::instrument(skip_all, fields(url = %url))]
@@ -191,6 +208,17 @@ async fn get_media_urls_anonymous(ctx: &ActionCtx, url: &str) -> Result<Option<V
     Ok(Some(urls))
 }
 
+#[derive(Debug)]
+struct InstagramStreamCacheWithShortcode {
+    info: InstagramStreamCache,
+    shortcode: Option<String>,
+}
+impl InstagramStreamCacheWithShortcode {
+    pub fn get_media_urls(&self) -> Vec<Url> {
+        self.info.get_media_urls(self.shortcode.as_deref())
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[allow(clippy::enum_variant_names)]
 enum InstagramStreamCache {
@@ -201,12 +229,32 @@ enum InstagramStreamCache {
     },
     #[serde(rename = "xdt_api__v1__clips__clips_on_logged_out_connection_v2")]
     Clip { edges: Vec<ClipEdge> },
+    #[serde(rename = "xig_logged_out_reels_feed")]
+    LoggedOutReels { edges: Vec<LoggedOutReelEdge> },
 }
 impl InstagramStreamCache {
-    fn get_media_urls(&self) -> Vec<Url> {
+    fn get_media_urls(&self, shortcode: Option<&str>) -> Vec<Url> {
         match self {
             Self::Media { resource } => resource.get_media_urls(),
             Self::Clip { edges } => edges.iter().flat_map(|x| x.node.get_media_urls()).collect(),
+            Self::LoggedOutReels { edges } => {
+                let edge = {
+                    let mut iter = edges.iter();
+                    if let Some(shortcode) = shortcode {
+                        iter.find(|edge| {
+                            edge.node.get("code").and_then(serde_json::Value::as_str)
+                                == Some(shortcode)
+                        })
+                    } else {
+                        iter.next()
+                    }
+                };
+
+                edge.and_then(|edge| {
+                    serde_json::from_value::<InstagramMedia>(edge.node.clone()).ok()
+                })
+                .map_or_else(Vec::new, |media| media.get_media_urls())
+            }
         }
     }
 }
@@ -214,6 +262,11 @@ impl InstagramStreamCache {
 #[derive(Debug, Deserialize)]
 struct ClipEdge {
     node: InstagramMedia,
+}
+
+#[derive(Debug, Deserialize)]
+struct LoggedOutReelEdge {
+    node: serde_json::Value,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -265,8 +318,10 @@ struct InstagramSimpleUrl {
     url: Url,
 }
 
-fn extract_info_from_html(html: &str) -> Option<InstagramStreamCache> {
-    Html::parse_document(html)
+fn extract_info_from_html(html: &str) -> Option<InstagramStreamCacheWithShortcode> {
+    let html = Html::parse_document(html);
+
+    let info = html
         .select(&Selector::parse("script").expect("Invalid selector"))
         .filter_map(|x| {
             let text = x.text().collect::<String>();
@@ -282,7 +337,11 @@ fn extract_info_from_html(html: &str) -> Option<InstagramStreamCache> {
             let val = find_stream_cache(val)?;
 
             serde_json::from_value::<InstagramStreamCache>(val).ok()
-        })
+        })?;
+
+    let shortcode = shortcode_from_html(&html).ok();
+
+    Some(InstagramStreamCacheWithShortcode { info, shortcode })
 }
 
 fn find_stream_cache(val: serde_json::Value) -> Option<serde_json::Value> {
@@ -319,19 +378,21 @@ fn find_stream_cache(val: serde_json::Value) -> Option<serde_json::Value> {
     None
 }
 
-fn extract_info_from_html_authed(html: &str, shortcode: &str) -> Option<Vec<Url>> {
-    Html::parse_document(html)
-        .select(&Selector::parse("script").expect("Invalid selector"))
+fn extract_info_from_html_authed(html: &str) -> Option<Vec<Url>> {
+    let html = Html::parse_document(html);
+    let shortcode = shortcode_from_html(&html).ok()?;
+
+    html.select(&Selector::parse("script").expect("Invalid selector"))
         .filter_map(|x| {
             let text = x.text().collect::<String>();
-            if !text.contains(shortcode) {
+            if !text.contains(&shortcode) {
                 return None;
             }
             Some(text)
         })
         .find_map(|script| {
             let val = serde_json::from_str::<serde_json::Value>(&script).ok()?;
-            find_media_for_code(&val, shortcode)
+            find_media_for_code(&val, &shortcode)
         })
 }
 

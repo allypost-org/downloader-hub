@@ -3,7 +3,7 @@ resolver = "2"
 members = ["bins/*", "crates/*"]
 
 [workspace.package]
-version = "0.11.2"
+version = "0.11.3"
 edition = "2024"
 description = "A meme downloader"
 license = "MPL-2.0"
