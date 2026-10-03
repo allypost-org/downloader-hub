@@ -1,6 +1,6 @@
 use std::{net::IpAddr, sync::LazyLock};
 
-use dns_lookup::lookup_host;
+use dns_lookup::{LookupError, lookup_host};
 use ipnet::{Ipv4Net, Ipv6Net};
 use iprange::IpRange;
 use url::Url;
@@ -17,7 +17,7 @@ pub enum UrlIpValidationError {
     NoHost,
 
     #[error("DNS lookup error: {0}")]
-    DnsLookup(std::io::Error),
+    DnsLookup(LookupError),
 
     #[error("Domain resolves to reserved IP: {0:?}")]
     ReservedIp(Vec<IpAddr>),

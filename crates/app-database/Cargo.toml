@@ -8,9 +8,9 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 app-config.workspace = true
-convex = { version = "0.10.1", default-features = false, features = ["parking_lot", "rustls-tls-webpki-roots"] }
-data-encoding = "2.9.0"
-derive_more = "2.0.1"
+convex = { version = "0.10.4", default-features = false, features = ["parking_lot", "rustls-tls-webpki-roots"] }
+data-encoding = "2.11.1"
+derive_more = "2.1.1"
 futures.workspace = true
 jiff.workspace = true
 maplit = "1.0.2"

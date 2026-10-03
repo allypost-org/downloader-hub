@@ -7,14 +7,14 @@ license.workspace = true
 
 [dependencies]
 derive_more.workspace = true
-http = "1.4.2"
+http = "1.5.0"
 http-serde = "2.1.1"
-reqwest = { version = "0.13.4", default-features = false, features = ["brotli", "cookies", "deflate", "gzip", "json", "multipart", "rustls", "stream"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["brotli", "cookies", "deflate", "gzip", "json", "multipart", "rustls", "stream"] }
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "logging", "std", "tls12"] }
 rustls-native-certs = "0.8"
 serde.workspace = true
 url.workspace = true
-webpki-root-certs = "1.0.7"
+webpki-root-certs = "1.0.9"
 
 [lints]
 workspace = true

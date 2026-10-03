@@ -1,4 +1,7 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
 
 use app_database::Database;
 use app_peer_comms::PeeringEndpoint;
@@ -129,7 +132,7 @@ where
 struct MakeRequestUlid;
 impl MakeRequestId for MakeRequestUlid {
     fn make_request_id<B>(&mut self, _request: &Request<B>) -> Option<RequestId> {
-        let mut id = ulid::Ulid::new().to_string();
+        let mut id = ulid::Ulid::from_datetime(SystemTime::now()).to_string();
         id.make_ascii_lowercase();
         let val = HeaderValue::from_str(&id).ok()?;
 

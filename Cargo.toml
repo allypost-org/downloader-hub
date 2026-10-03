@@ -9,7 +9,7 @@ description = "A meme downloader"
 license = "MPL-2.0"
 
 [workspace.dependencies]
-anyhow = "1.0.102"
+anyhow = "1.0.104"
 app-actions = { path = "crates/app-actions", version = "*" }
 app-config = { path = "crates/app-config", version = "*" }
 app-database = { path = "crates/app-database", version = "*" }
@@ -20,21 +20,21 @@ app-peer-comms = { path = "crates/app-peer-comms", version = "*" }
 app-requests = { path = "crates/app-requests", version = "*" }
 app-tasks = { path = "crates/app-tasks", version = "*" }
 arc-swap = "1.9"
-async-trait = "0.1.89"
-clap = { version = "4.6.1", features = ["derive", "env"] }
+async-trait = "0.1.92"
+clap = { version = "4.6.7", features = ["derive", "env"] }
 derive_more = { version = "2.1.1", features = ["debug"] }
-futures = { version = "0.3.32", features = ["thread-pool"] }
+futures = { version = "0.3.34", features = ["thread-pool"] }
 jiff = { version = "0.2", features = ["serde"] }
 serde = { version = "1.0", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0" }
 size = { version = "0.5.0", features = ["serde"] }
 thiserror = "2.0"
 tikv-jemallocator = "0.7"
-tokio = { version = "1.52.3", features = ["fs", "io-uring", "macros", "process", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1.53.1", features = ["fs", "io-uring", "macros", "process", "rt-multi-thread", "sync", "time"] }
 tracing = { version = "0.1.44" }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json", "parking_lot"] }
 url = { version = "2.5.8", features = ["serde"] }
-validator = "0.20.0"
+validator = "0.21.0"
 
 [workspace.lints.clippy]
 cognitive_complexity = "allow"

@@ -13,25 +13,25 @@ app-logger.workspace = true
 app-peer-comms.workspace = true
 app-requests.workspace = true
 arc-swap.workspace = true
-axum = { version = "0.8.6", features = ["macros", "ws"] }
+axum = { version = "0.8.9", features = ["macros", "ws"] }
 axum-extra = { version = "0.12.6", features = ["cookie-key-expansion", "cookie-signed"] }
-base64 = "0.22"
+base64 = "0.23"
 clap.workspace = true
-const_format = "0.2.35"
-cookie = "0.18.1"
+const_format = "0.2.36"
+cookie = "0.18.2"
 dotenvy = "0.15.7"
 futures.workspace = true
-http = "1.4.2"
+http = "1.5.0"
 jiff.workspace = true
 mime_guess = "2.0.5"
-rust-embed = "8.7.2"
+rust-embed = "8.12.0"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tikv-jemallocator.workspace = true
 tokio.workspace = true
-tower = "0.5.2"
-tower-http = { version = "0.7.0", features = ["full"] }
+tower = "0.5.3"
+tower-http = { version = "0.7.1", features = ["full"] }
 tracing.workspace = true
 url.workspace = true
 validator.workspace = true
