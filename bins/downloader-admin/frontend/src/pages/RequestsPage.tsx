@@ -351,7 +351,7 @@ export function RequestsPage() {
 
         <div>
           <RequestDetail
-            className="sticky top-4"
+            className="sticky top-4 max-h-[calc(100dvh-2rem)] overflow-auto overscroll-contain"
             request={selected}
             onClose={() => setSelected(null)}
             authedLabel={authedLabel}

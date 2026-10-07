@@ -321,7 +321,8 @@ pub async fn get_request(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     match state.db.requests_get(Arc::from(id.as_str())).await {
-        Ok(req) => V1Response::ok(req),
+        Ok(Some(req)) => V1Response::ok(req),
+        Ok(None) => V1Response::err(StatusCode::NOT_FOUND, "request not found"),
         Err(e) => {
             tracing::error!(?e, "get_request failed");
             V1Response::err(StatusCode::INTERNAL_SERVER_ERROR, "database error")

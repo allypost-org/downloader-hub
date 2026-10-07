@@ -190,7 +190,7 @@ impl Database {
     pub async fn requests_get(
         &self,
         request_id: Arc<str>,
-    ) -> Result<RequestInfoResponse, DatabaseError> {
+    ) -> Result<Option<RequestInfoResponse>, DatabaseError> {
         DatabaseRequest::named("requests:get")
             .with_arg("requestId", request_id.as_ref())
             .query(self)

@@ -80,8 +80,10 @@ export const get = query({
   args: {
     requestId: v.id(requestsId),
   },
-  handler: (ctx, args) => {
-    return ctx.db.get(args.requestId);
+  returns: v.union(v.object(requestDataReturn), v.null()),
+  handler: async (ctx, args) => {
+    const row = await ctx.db.get(args.requestId);
+    return row ? toRequestData(row) : null;
   },
 });
 
