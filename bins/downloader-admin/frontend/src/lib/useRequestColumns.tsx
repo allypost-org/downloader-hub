@@ -2,7 +2,11 @@ import { useMemo } from "react";
 import { type ColumnDef } from "@tanstack/react-table";
 import type { UseMutationResult } from "@tanstack/react-query";
 import type { RequestInfoResponse } from "@/lib/api";
-import type { useAccountNames } from "@/lib/useAccountNames";
+import {
+  accountRefKey as refKeyOf,
+  isSameRef,
+  type useAccountNames,
+} from "@/lib/useAccountNames";
 import { requestKindFromInfo, requestKindLabel } from "@/lib/requestKind";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -73,10 +77,27 @@ export function useRequestColumns({
       {
         id: "orderedBy",
         header: "Ordered by",
-        accessorFn: (r) =>
-          r.orderedBy ? accounts.userLabelWithFallback(r.orderedBy) : "",
+        accessorFn: (r) => {
+          const parts: string[] = [];
+          if (r.orderedBy) {
+            parts.push(
+              accounts.userLabelWithFallback(r.orderedBy),
+              refKeyOf(r.orderedBy),
+            );
+          }
+          if (r.orderedIn && !isSameRef(r.orderedIn, r.orderedBy)) {
+            parts.push(
+              accounts.placeLabelWithFallback(r.orderedIn),
+              refKeyOf(r.orderedIn),
+            );
+          }
+          return parts.join(" ");
+        },
         cell: ({ row }) => {
           const r = row.original;
+          // Private chats store the user and the place under one platform id;
+          // repeating the place name next to the user name adds nothing.
+          const showPlace = !!r.orderedIn && !isSameRef(r.orderedIn, r.orderedBy);
           return (
             <div className="flex flex-col text-xs">
               <span>
@@ -84,9 +105,15 @@ export function useRequestColumns({
                   ? accounts.userLabelWithFallback(r.orderedBy)
                   : "\u2014"}
               </span>
-              {r.orderedIn && (
+              {r.orderedBy && (
                 <span className="text-muted-foreground">
-                  in {accounts.placeLabelWithFallback(r.orderedIn)}
+                  {r.orderedBy.platform}
+                </span>
+              )}
+              {showPlace && r.orderedIn && (
+                <span className="text-muted-foreground">
+                  in {accounts.placeLabelWithFallback(r.orderedIn)} (
+                  {r.orderedIn.platform})
                 </span>
               )}
             </div>
