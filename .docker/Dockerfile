@@ -78,6 +78,7 @@ RUN cargo chef prepare \
 ##
 FROM chef AS deps
 ARG RUST_TARGET
+COPY .cargo/config.toml ./.cargo/config.toml
 COPY --from=planner /chef/recipe.json recipe.json
 # NOTE: do NOT cache-mount `/app/target` here. cargo-chef writes the cooked
 # dependencies into that directory so they persist in the layer and are
